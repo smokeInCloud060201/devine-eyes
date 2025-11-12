@@ -1,0 +1,20 @@
+[package]
+name = "eyes-devine-services"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# Workspace dependencies
+bollard = { workspace = true }
+redis = { workspace = true }
+sea-orm = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+
+# Local dependencies
+eyes-devine-shared = { path = "../shared" }
+

@@ -1,0 +1,82 @@
+# Eyes Devine - Project Rules for AI Assistant
+
+## Project Structure
+- `backend/server/src/` - HTTP server code (actix-web)
+- `backend/services/src/` - Business logic and infrastructure (Docker, Redis, Database)
+- `backend/ui/src/` - Leptos frontend UI (separate crate, WASM)
+- `backend/shared/src/` - Shared types between server and UI
+- `migrations/` - Database migrations (SeaORM)
+
+## Code Style & Conventions
+
+### Rust
+- Use Rust edition 2021 (or 2024 if explicitly specified)
+- Follow Rust naming conventions (snake_case for functions/variables, PascalCase for types)
+- Prefer `?` operator over explicit error handling where appropriate
+- Use `anyhow::Result` for error handling in application code
+- Use `thiserror` for library-style error types
+
+### Leptos (Frontend)
+- Use Leptos 0.8.x (latest stable)
+- All UI components in `backend/ui/src/`
+- Use CSR (Client-Side Rendering) mode
+- Components should be in `app.rs`
+- Use `eyes_devine_shared` crate for models (not local models.rs)
+
+### API (Backend)
+- Use actix-web 4.x
+- Server code in `backend/server/src/`
+- Handlers in `handlers.rs`
+- Routes in `routes.rs`
+- Business logic in `backend/services/src/`
+- Use `eyes_devine_shared` for models (not local models.rs)
+- Use async/await throughout
+
+## Dependencies
+- **When adding new dependencies, always use the latest stable version available**
+- Check latest version on crates.io before adding
+- Use exact version numbers (e.g., `"1.2.3"`) not version ranges for new dependencies
+- Keep dependency versions consistent across the project
+- When updating dependencies, update all related crates
+- Prefer stable versions over beta/rc unless necessary
+- For existing dependencies, maintain current versions unless explicitly updating
+
+## File Organization
+- Keep related code together (MVC pattern)
+- Separate concerns: Server logic separate from UI logic
+- Server, services, UI, and shared are separate crates in workspace
+- Clear boundaries: server handles HTTP, services handle business logic
+
+## Build & Development
+- UI must be built with `wasm-pack` before backend can serve it
+- Use `make build` in `backend/ui/` to build the frontend
+- Server serves UI files from `../ui/pkg/` and `../ui/target/site/`
+- Build workspace: `cd backend && cargo build`
+- Run server: `cd backend/server && cargo run`
+
+## Error Handling
+- Always handle errors gracefully
+- Log errors appropriately (use `log::warn!` for recoverable errors)
+- Don't crash the application on non-critical errors (e.g., Redis/Database connection failures)
+
+## When Making Changes
+1. Check if changes affect both API and UI (e.g., model changes)
+2. Update both if models are shared
+3. Build UI after model changes
+4. Test that backend can serve the UI correctly
+
+## Testing
+- Write tests for critical business logic
+- Test API endpoints
+- Test UI components where possible
+
+## Documentation
+- Add doc comments for public APIs
+- Update README files when structure changes
+- Keep code comments clear and concise
+
+## Git
+- Don't commit build artifacts (`target/`, `pkg/`, `Cargo.lock` in UI)
+- Keep migrations in version control
+- Commit source code changes together
+

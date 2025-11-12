@@ -1,0 +1,26 @@
+[package]
+name = "eyes-devine-frontend"
+version = "0.1.0"
+edition = "2021"
+
+[build]
+minify = { css = true, js = true }
+site_root = "target/site"
+site_pkg_dir = "pkg"
+app_fn = "eyes_devine_frontend::App"
+env = "PROD"
+reload_port = 3001
+reload_external_port = 3001
+
+[output]
+site_root = "target/site"
+site_pkg_dir = "pkg"
+
+[server]
+address = "127.0.0.1"
+port = 3000
+reload_port = 3001
+
+[client]
+output_name = "eyes-devine-frontend"
+
