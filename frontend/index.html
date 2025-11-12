@@ -3,20 +3,12 @@
     <head>
         <meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Docker Monitor - Eyes Devine</title>
+        <title>Eyes Devine</title>
+        <link data-trunk rel="css" href="style.css"/>
     </head>
     <body>
-        <noscript>
-            <strong>We're sorry but this app doesn't work properly without JavaScript enabled. Please enable it to continue.</strong>
-        </noscript>
-        <script type="module">
-            import init, { main } from "/pkg/eyes-devine-frontend.js";
-            async function run() {
-                await init();
-                main();
-            }
-            run();
-        </script>
+        <div id="root"></div>
+        <noscript>You need to enable JavaScript to run this app.</noscript>
     </body>
 </html>
 

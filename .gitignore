@@ -8,6 +8,7 @@ backend/api/Cargo.lock
 backend/site/
 frontend/target/
 frontend/pkg/
+frontend/dist/
 
 # Environment
 backend/.env

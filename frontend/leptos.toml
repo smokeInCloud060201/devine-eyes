@@ -1,26 +1,23 @@
 [package]
-name = "eyes-devine-frontend"
+name = "frontend"
 version = "0.1.0"
 edition = "2021"
 
 [build]
-minify = { css = true, js = true }
-site_root = "target/site"
-site_pkg_dir = "pkg"
-app_fn = "eyes_devine_frontend::App"
-env = "PROD"
-reload_port = 3001
-reload_external_port = 3001
+# The browser JS/WASM are loaded from here
+site-pkg-dir = "pkg"
+# The source CSS file. cargo-leptos will process this with the given stylesheet engine (currently tailwind)
+style-file = "style.css"
+# The JS/WASM bundle name. Defaults to the package name
+app-name = "frontend"
+# The site root directory is where cargo-leptos generate all output. WARNING: all contents of this directory will be overwritten on rebuild.
+site-root = "target/site"
+# The site-root of the app, served by cargo-leptos. Typically the site-root folder.
+site-pkg-url = "/pkg"
 
-[output]
-site_root = "target/site"
-site_pkg_dir = "pkg"
-
-[server]
-address = "127.0.0.1"
-port = 3000
-reload_port = 3001
-
-[client]
-output_name = "eyes-devine-frontend"
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
 

@@ -1,133 +1,104 @@
-# Eyes Devine Frontend
+# Frontend - Leptos UI
 
-Leptos SSR frontend application for Docker Monitor.
+This is the Leptos frontend application for Eyes Devine, created using the Actix template pattern.
 
-## Quick Start
+## Prerequisites
 
-### Using Makefile (Recommended)
+Install required tools:
 
-1. **Install dependencies:**
+1. **wasm-pack** - For building WebAssembly bundles:
 ```bash
-make install
+cargo install wasm-pack
 ```
 
-2. **Development mode with hot reload:**
+2. **trunk** - For hot reload development server (recommended):
 ```bash
-make dev
+cargo install trunk --locked
 ```
 
-3. **Production build and run:**
-```bash
-make run
-```
-
-### Manual Setup
-
-1. Install dependencies:
+3. Ensure the `wasm32-unknown-unknown` target is installed:
 ```bash
 rustup target add wasm32-unknown-unknown
 ```
 
-2. Build the frontend:
+## Development with Hot Reload
+
+The easiest way to develop is using `trunk` with hot reload:
+
 ```bash
-cargo build --release
+make watch
 ```
 
-3. Build the WASM bundle:
+Or directly:
 ```bash
-wasm-pack build --target web --out-dir pkg --release
+trunk serve
 ```
 
-4. Copy files to site directory:
+This will:
+- Start a development server at `http://127.0.0.1:3000`
+- Automatically rebuild on file changes
+- Hot reload the browser when changes are detected
+- Open the browser automatically
+
+## Building
+
+### Production Build (for backend serving)
 ```bash
-mkdir -p target/site
-cp index.html target/site/
-cp -r pkg target/site/
+make build
 ```
 
-5. Run the server:
-```bash
-cargo run --release --bin server
-```
-
-## Makefile Commands
-
-| Command | Description |
-|---------|-------------|
-| `make install` | Install required dependencies |
-| `make build` | Build everything (server + WASM, release mode) |
-| `make build-wasm` | Build only WASM bundle (release) |
-| `make build-wasm-dev` | Build only WASM bundle (dev, faster) |
-| `make build-server` | Build only server binary (release) |
-| `make build-server-dev` | Build only server binary (dev) |
-| `make run` | Build and run server (production) |
-| `make run-dev` | Build and run server (dev mode) |
-| `make dev` | **Development mode with hot reload (Rust only)** |
-| `make dev-full` | Development mode with full hot reload (Rust + WASM) |
-| `make clean` | Clean all build artifacts |
-| `make help` | Show all available commands |
-
-## Development Workflow
-
-### Recommended: Fast Development
+### Development Build (faster compilation, larger binary)
 ```bash
 make dev
 ```
-- Watches Rust code changes and auto-reloads server
-- WASM needs manual rebuild: `make build-wasm-dev` when UI code changes
-- Fastest option for backend/server development
 
-### Full Hot Reload
+### Build with Trunk (alternative)
 ```bash
-make dev-full
+trunk build --release
 ```
-- Watches Rust code and automatically rebuilds WASM
-- Slower but fully automatic
-- Best for frontend/UI development
 
-### Prerequisites for Hot Reload
+## Development
+
+The frontend is built using:
+- **Leptos 0.8.0** - Reactive web framework
+- **wasm-pack** - Build tool for WebAssembly
+- **CSR Mode** - Client-Side Rendering (can be upgraded to SSR if needed)
+
+## Structure
+
+- `src/app.rs` - Main application component
+- `src/lib.rs` - Entry point for WASM
+- `index.html` - HTML template
+- `style.css` - Stylesheet
+- `leptos.toml` - Leptos configuration
+- `Trunk.toml` - Trunk configuration for hot reload
+- `pkg/` - Generated WASM/JS bundle (after wasm-pack build)
+- `dist/` - Generated output from trunk (for hot reload)
+- `target/site/` - Final build output (served by backend)
+
+## Features
+
+- ✅ Basic Leptos component structure
+- ✅ Reactive signals and state management
+- ✅ Hot reload development server with trunk
+- ✅ Routing support (leptos_router included, can be added when needed)
+- ✅ Modern CSS styling
+- ✅ Ready for integration with backend API
+
+## Integration with Backend
+
+The backend server should serve the frontend from:
+- `/pkg/*` - WASM and JS files
+- `/` - HTML and static assets
+
+Build the frontend before running the server:
 ```bash
-cargo install cargo-watch
+make build
+cd ../backend/server
+cargo run
 ```
 
-## Running
+## Adding Routing
 
-Set the backend API URL (optional, defaults to http://127.0.0.1:8080):
-```bash
-export BACKEND_API_URL=http://127.0.0.1:8080
-```
-
-Set the frontend port (optional, defaults to 3000):
-```bash
-export PORT=3000
-```
-
-The frontend will be available at http://127.0.0.1:3000
-
-## Architecture
-
-- **Server**: Axum-based HTTP server with Leptos SSR
-- **Client**: WASM bundle that hydrates the server-rendered HTML
-- **API**: Calls backend REST API at `http://127.0.0.1:8080/api/*`
-
-## Environment Variables
-
-- `BACKEND_API_URL`: Backend API base URL (default: http://127.0.0.1:8080)
-- `PORT`: Frontend server port (default: 3000)
-
-## Project Structure
-
-```
-frontend/
-├── src/
-│   ├── main.rs      # Axum server entry point
-│   ├── app.rs       # Leptos UI components
-│   ├── lib.rs       # Library exports
-│   └── style.css    # Styles
-├── Cargo.toml       # Rust dependencies
-├── leptos.toml      # Leptos configuration
-├── index.html       # HTML template
-├── Makefile         # Build automation
-└── README.md        # This file
-```
+To add routing, import and use `leptos_router` components. The dependency is already included in `Cargo.toml`.
 

@@ -1,8 +1,10 @@
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use leptos_meta::*;
 use leptos_router::components::*;
 use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use wasm_bindgen::JsCast;
 
 // API Models (matching backend/shared/src/models.rs)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,14 +59,11 @@ pub fn App() -> impl IntoView {
     provide_meta_context();
 
     view! {
-        <Stylesheet id="leptos" href="/pkg/eyes-devine-frontend.css"/>
+        <Stylesheet id="leptos" href="/pkg/frontend.css"/>
         <Title text="Docker Monitor - Eyes Devine"/>
         <Meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-        <style>
-            {include_str!("style.css")}
-        </style>
         <Router>
-            <Routes fallback=|| view! { <div>"404 - Not Found"</div> }>
+            <Routes fallback=move || view! { <div>"404 - Not Found"</div> }>
                 <Route path=() view=DockerMonitor/>
             </Routes>
         </Router>
@@ -83,7 +82,6 @@ fn DockerMonitor() -> impl IntoView {
     let (error, set_error) = signal(None::<String>);
 
     // Load data on mount (client-side only)
-    #[cfg(not(feature = "ssr"))]
     {
         spawn_local(async move {
             refresh_all(
@@ -106,19 +104,16 @@ fn DockerMonitor() -> impl IntoView {
             <button
                 class="refresh-btn"
                 on:click=move |_| {
-                    #[cfg(not(feature = "ssr"))]
-                    {
-                        spawn_local(async move {
-                            refresh_all(
-                                set_total_stats,
-                                set_containers,
-                                set_container_stats,
-                                set_loading,
-                                set_error,
-                            )
-                            .await;
-                        });
-                    }
+                    spawn_local(async move {
+                        refresh_all(
+                            set_total_stats,
+                            set_containers,
+                            set_container_stats,
+                            set_loading,
+                            set_error,
+                        )
+                        .await;
+                    });
                 }
             >
                 "🔄 Refresh All"
@@ -140,19 +135,16 @@ fn DockerMonitor() -> impl IntoView {
                 container_stats=container_stats
                 on_select=move |id: String| {
                     set_selected_container.set(Some(id.clone()));
-                    #[cfg(not(feature = "ssr"))]
-                    {
-                        spawn_local(async move {
-                            load_logs(
-                                Some(id),
-                                log_limit.get(),
-                                set_logs,
-                                set_loading,
-                                set_error,
-                            )
-                            .await;
-                        });
-                    }
+                    spawn_local(async move {
+                        load_logs(
+                            Some(id),
+                            log_limit.get(),
+                            set_logs,
+                            set_loading,
+                            set_error,
+                        )
+                        .await;
+                    });
                 }
             />
             <LogsView
@@ -162,12 +154,24 @@ fn DockerMonitor() -> impl IntoView {
                 log_limit=log_limit
                 on_container_change=move |id: String| {
                     set_selected_container.set(Some(id.clone()));
-                    #[cfg(not(feature = "ssr"))]
-                    {
+                    spawn_local(async move {
+                        load_logs(
+                            Some(id),
+                            log_limit.get(),
+                            set_logs,
+                            set_loading,
+                            set_error,
+                        )
+                        .await;
+                    });
+                }
+                on_limit_change=move |limit: u64| {
+                    set_log_limit.set(limit);
+                    if let Some(container_id) = selected_container.get() {
                         spawn_local(async move {
                             load_logs(
-                                Some(id),
-                                log_limit.get(),
+                                Some(container_id),
+                                limit,
                                 set_logs,
                                 set_loading,
                                 set_error,
@@ -176,39 +180,18 @@ fn DockerMonitor() -> impl IntoView {
                         });
                     }
                 }
-                on_limit_change=move |limit: u64| {
-                    set_log_limit.set(limit);
-                    #[cfg(not(feature = "ssr"))]
-                    {
-                        if let Some(container_id) = selected_container.get() {
-                            spawn_local(async move {
-                                load_logs(
-                                    Some(container_id),
-                                    limit,
-                                    set_logs,
-                                    set_loading,
-                                    set_error,
-                                )
-                                .await;
-                            });
-                        }
-                    }
-                }
                 on_load=move || {
-                    #[cfg(not(feature = "ssr"))]
-                    {
-                        if let Some(container_id) = selected_container.get() {
-                            spawn_local(async move {
-                                load_logs(
-                                    Some(container_id),
-                                    log_limit.get(),
-                                    set_logs,
-                                    set_loading,
-                                    set_error,
-                                )
-                                .await;
-                            });
-                        }
+                    if let Some(container_id) = selected_container.get() {
+                        spawn_local(async move {
+                            load_logs(
+                                Some(container_id),
+                                log_limit.get(),
+                                set_logs,
+                                set_loading,
+                                set_error,
+                            )
+                            .await;
+                        });
                     }
                 }
                 on_clear=move || {
@@ -269,7 +252,7 @@ fn StatCard(title: String, value: String, unit: String) -> impl IntoView {
 fn ContainersView(
     containers: ReadSignal<Vec<ContainerInfo>>,
     container_stats: ReadSignal<Vec<ContainerStats>>,
-    on_select: impl Fn(String) + Send + Sync + 'static,
+    on_select: impl Fn(String) + Send + Sync + Clone + 'static,
 ) -> impl IntoView {
     view! {
         <div class="containers-section">
@@ -290,6 +273,7 @@ fn ContainersView(
                             .into_iter()
                             .find(|s| s.container_id == container.id);
                         let container_id = container.id.clone();
+                        let on_select = on_select.clone();
                         view! {
                             <ContainerCard
                                 container=container
@@ -312,16 +296,41 @@ fn ContainerCard(
     stats: Option<ContainerStats>,
     on_click: impl Fn() + Send + Sync + 'static,
 ) -> impl IntoView {
+    let container_name = stats
+        .as_ref()
+        .map(|s| s.container_name.clone())
+        .unwrap_or_else(|| container.name.clone());
+    
+    // Format all stats strings before the view to avoid closure move issues
+    let (cpu, mem_used, mem_limit, mem_pct, net_rx, net_tx, block_r, block_w) = if let Some(s) = stats.as_ref() {
+        (
+            format!("{:.2}%", s.cpu_usage_percent),
+            format_bytes(s.memory_usage_bytes),
+            format_bytes(s.memory_limit_bytes),
+            format!("{:.2}%", s.memory_usage_percent),
+            format_bytes(s.network_rx_bytes),
+            format_bytes(s.network_tx_bytes),
+            format_bytes(s.block_read_bytes),
+            format_bytes(s.block_write_bytes),
+        )
+    } else {
+        (
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        )
+    };
+    
+    let has_stats = stats.is_some();
+    
     view! {
         <div class="container-card" on:click=move |_| on_click()>
-            <h3>
-                {move || {
-                    stats
-                        .as_ref()
-                        .map(|s| s.container_name.clone())
-                        .unwrap_or_else(|| container.name.clone())
-                }}
-            </h3>
+            <h3>{container_name}</h3>
             <div class="container-info">
                 {"ID: "}
                 {container.id.chars().take(12).collect::<String>()}
@@ -329,44 +338,40 @@ fn ContainerCard(
             </div>
             <div class="container-info">{"Image: "} {container.image.clone()}</div>
             <div class="container-info">{"Status: "} {container.status.clone()}</div>
-            <Show when=move || stats.is_some()>
-                {move || {
-                    stats.as_ref().map(|s| view! {
-                        <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
-                            <div class="container-info">
-                                <strong>"CPU: "</strong>
-                                {format!("{:.2}%", s.cpu_usage_percent)}
-                            </div>
-                            <div class="container-info">
-                                <strong>"Memory: "</strong>
-                                {format_bytes(s.memory_usage_bytes)}
-                                {" / "}
-                                {format_bytes(s.memory_limit_bytes)}
-                                {" ("}
-                                {format!("{:.2}%", s.memory_usage_percent)}
-                                {")"}
-                            </div>
-                            <div class="container-info">
-                                <strong>"Network RX: "</strong>
-                                {format_bytes(s.network_rx_bytes)}
-                            </div>
-                            <div class="container-info">
-                                <strong>"Network TX: "</strong>
-                                {format_bytes(s.network_tx_bytes)}
-                            </div>
-                            <div class="container-info">
-                                <strong>"Block Read: "</strong>
-                                {format_bytes(s.block_read_bytes)}
-                            </div>
-                            <div class="container-info">
-                                <strong>"Block Write: "</strong>
-                                {format_bytes(s.block_write_bytes)}
-                            </div>
-                        </div>
-                    })
-                }}
+            <Show when=move || has_stats>
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
+                    <div class="container-info">
+                        <strong>"CPU: "</strong>
+                        {cpu.clone()}
+                    </div>
+                    <div class="container-info">
+                        <strong>"Memory: "</strong>
+                        {mem_used.clone()}
+                        {" / "}
+                        {mem_limit.clone()}
+                        {" ("}
+                        {mem_pct.clone()}
+                        {")"}
+                    </div>
+                    <div class="container-info">
+                        <strong>"Network RX: "</strong>
+                        {net_rx.clone()}
+                    </div>
+                    <div class="container-info">
+                        <strong>"Network TX: "</strong>
+                        {net_tx.clone()}
+                    </div>
+                    <div class="container-info">
+                        <strong>"Block Read: "</strong>
+                        {block_r.clone()}
+                    </div>
+                    <div class="container-info">
+                        <strong>"Block Write: "</strong>
+                        {block_w.clone()}
+                    </div>
+                </div>
             </Show>
-            <Show when=move || stats.is_none()>
+            <Show when=move || !has_stats>
                 <div class="container-info" style="color: #999; margin-top: 10px;">
                     "Stats unavailable"
                 </div>
@@ -392,8 +397,9 @@ fn LogsView(
             <div class="logs-controls">
                 <select
                     on:change=move |ev| {
-                        let value = event_target_value(&ev);
-                        on_container_change(value);
+                        if let Some(select) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlSelectElement>().ok()) {
+                            on_container_change(select.value());
+                        }
                     }
                 >
                     <option value="" selected=move || selected_container.get().is_none()>
@@ -420,9 +426,10 @@ fn LogsView(
                     max="1000"
                     value=move || log_limit.get().to_string()
                     on:input=move |ev| {
-                        let value = event_target_value(&ev);
-                        if let Ok(limit) = value.parse::<u64>() {
-                            on_limit_change(limit);
+                        if let Some(input) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok()) {
+                            if let Ok(limit) = input.value().parse::<u64>() {
+                                on_limit_change(limit);
+                            }
                         }
                     }
                 />
@@ -459,8 +466,7 @@ fn LogsView(
     }
 }
 
-// API client functions - client-side only
-#[cfg(not(feature = "ssr"))]
+// API client functions
 async fn refresh_all(
     set_total_stats: WriteSignal<Option<TotalStats>>,
     set_containers: WriteSignal<Vec<ContainerInfo>>,
@@ -497,7 +503,6 @@ async fn refresh_all(
     set_loading.set(false);
 }
 
-#[cfg(not(feature = "ssr"))]
 async fn load_logs(
     container_id: Option<String>,
     limit: u64,
@@ -521,7 +526,6 @@ async fn load_logs(
     }
 }
 
-#[cfg(not(feature = "ssr"))]
 async fn fetch_json<T>(url: &str) -> Result<T, String>
 where
     T: serde::de::DeserializeOwned,
@@ -529,9 +533,9 @@ where
     use wasm_bindgen_futures::JsFuture;
     use web_sys::{Request, RequestInit, RequestMode, Response};
 
-    let mut opts = RequestInit::new();
-    opts.method("GET");
-    opts.mode(RequestMode::Cors);
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
 
     let request = Request::new_with_str_and_init(url, &opts)
         .map_err(|e| format!("Failed to create request: {:?}", e))?;
@@ -572,4 +576,3 @@ fn format_bytes(bytes: u64) -> String {
     let size = sizes[i];
     format!("{:.2} {}", bytes as f64 / k.powi(i as i32), size)
 }
-

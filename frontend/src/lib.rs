@@ -1,4 +1,11 @@
-pub mod app;
+use leptos::mount::mount_to_body;
+use wasm_bindgen::prelude::*;
 
-pub use app::*;
+mod app;
+
+#[wasm_bindgen(start)]
+pub fn main() {
+    console_error_panic_hook::set_once();
+    mount_to_body(app::App);
+}
 

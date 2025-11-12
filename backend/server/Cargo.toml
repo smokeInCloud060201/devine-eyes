@@ -11,6 +11,7 @@ path = "src/main.rs"
 # Workspace dependencies
 actix-web = { workspace = true }
 actix-rt = { workspace = true }
+actix-cors = { workspace = true }
 dotenv = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }

@@ -11,8 +11,59 @@ pub struct DockerService {
 
 impl DockerService {
     pub async fn new() -> Result<Self> {
-        let docker = Docker::connect_with_local_defaults()
-            .context("Failed to connect to Docker daemon")?;
+        // Try to detect Docker socket path
+        // Docker Desktop uses ~/.docker/desktop/docker.sock
+        // Standard Docker uses /var/run/docker.sock
+        // Also check DOCKER_HOST environment variable
+        let docker = if let Ok(docker_host) = std::env::var("DOCKER_HOST") {
+            log::info!("Using DOCKER_HOST: {}", docker_host);
+            // DOCKER_HOST can be unix:///path or tcp://host:port
+            if docker_host.starts_with("unix://") {
+                let socket_path = docker_host.strip_prefix("unix://").unwrap_or(&docker_host);
+                Docker::connect_with_socket(socket_path, 120, bollard::API_DEFAULT_VERSION)
+                    .context(format!("Failed to connect to Docker socket: {}", socket_path))?
+            } else {
+                Docker::connect_with_http(&docker_host, 120, bollard::API_DEFAULT_VERSION)
+                    .context(format!("Failed to connect to Docker host: {}", docker_host))?
+            }
+        } else if let Ok(home) = std::env::var("HOME") {
+            let desktop_path = format!("{}/.docker/desktop/docker.sock", home);
+            if std::path::Path::new(&desktop_path).exists() {
+                log::info!("Connecting to Docker Desktop socket: {}", desktop_path);
+                match Docker::connect_with_socket(&desktop_path, 120, bollard::API_DEFAULT_VERSION) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        log::warn!("Failed to connect to Docker Desktop socket ({}), trying default: {}", desktop_path, e);
+                        Docker::connect_with_local_defaults()
+                            .context("Failed to connect to Docker daemon")?
+                    }
+                }
+            } else {
+                log::info!("Using Docker local defaults");
+                Docker::connect_with_local_defaults()
+                    .context("Failed to connect to Docker daemon")?
+            }
+        } else {
+            log::info!("Using Docker local defaults");
+            Docker::connect_with_local_defaults()
+                .context("Failed to connect to Docker daemon")?
+        };
+        
+        // Test the connection by listing containers
+        let test_options = ListContainersOptions {
+            all: true,
+            ..Default::default()
+        };
+        let test_containers = docker.list_containers(Some(test_options)).await;
+        match test_containers {
+            Ok(containers) => {
+                log::info!("Docker connection successful. Found {} containers on initial connection test", containers.len());
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to connect to Docker daemon: {}. Make sure Docker is running and accessible.", e));
+            }
+        }
+        
         Ok(Self { docker })
     }
 
@@ -26,18 +77,55 @@ impl DockerService {
             .docker
             .list_containers(Some(options))
             .await
-            .context("Failed to list containers")?;
+            .map_err(|e| {
+                log::error!("Docker API error: {:?}", e);
+                anyhow::anyhow!("Failed to list containers: {}", e)
+            })?;
+
+        log::info!("Docker API returned {} containers", containers.len());
+        if containers.is_empty() {
+            log::warn!("No containers returned from Docker API, but containers are running. This might indicate a connection or permissions issue.");
+        }
 
         let mut result = Vec::new();
-        for container in containers {
-            let names = container.names.unwrap_or_default();
+        for (idx, container) in containers.iter().enumerate() {
+            log::debug!("Container {}: id={:?}, names={:?}, image={:?}, status={:?}", 
+                idx,
+                container.id,
+                container.names,
+                container.image,
+                container.status
+            );
+            
+            let container_id = container.id.clone().unwrap_or_else(|| {
+                log::warn!("Container at index {} has no ID, using empty string", idx);
+                String::new()
+            });
+            let names = container.names.clone().unwrap_or_default();
             let name = names.first().map(|n| n.trim_start_matches('/')).unwrap_or("unknown").to_string();
+            let image = container.image.clone().unwrap_or_else(|| {
+                log::warn!("Container {} has no image", name);
+                String::new()
+            });
+            let status = container.status.clone().unwrap_or_else(|| {
+                log::warn!("Container {} has no status", name);
+                String::new()
+            });
+            
+            log::debug!("Processing container: id={}, name={}, image={}, status={}", 
+                container_id, name, image, status);
+            
+            // Skip containers with empty IDs (shouldn't happen, but be safe)
+            if container_id.is_empty() {
+                log::warn!("Skipping container with empty ID: name={}, image={}", name, image);
+                continue;
+            }
             
             result.push(ContainerInfo {
-                id: container.id.unwrap_or_default(),
+                id: container_id,
                 name,
-                image: container.image.unwrap_or_default(),
-                status: container.status.unwrap_or_default(),
+                image,
+                status,
                 created: container.created.map(|ts| {
                     chrono::DateTime::from_timestamp(ts, 0)
                         .unwrap_or_else(Utc::now)
@@ -45,6 +133,7 @@ impl DockerService {
             });
         }
 
+        log::info!("Returning {} containers", result.len());
         Ok(result)
     }
 

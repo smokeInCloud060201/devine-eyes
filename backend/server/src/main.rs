@@ -7,6 +7,7 @@ use config::Config;
 use handlers::AppState;
 use eyes_devine_services::{CacheService, DockerService, create_connection};
 use std::sync::Arc;
+use actix_cors::Cors;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -61,7 +62,13 @@ async fn main() -> std::io::Result<()> {
     });
 
     HttpServer::new(move || {
+        let cors = Cors::default()
+            .allow_any_method()
+            .allow_any_origin()
+            .allow_any_header();
+
         App::new()
+            .wrap(cors)
             .app_data(app_state.clone())
             .configure(routes::configure)
     })
