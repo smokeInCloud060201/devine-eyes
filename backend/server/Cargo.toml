@@ -19,6 +19,8 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 sea-orm = { workspace = true }
 anyhow = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
 
 # Local dependencies
 eyes-devine-services = { path = "../services" }

@@ -310,5 +310,166 @@ impl DockerService {
 
         Ok(logs)
     }
+
+    pub async fn get_container_environment(&self, container_id: &str) -> Result<Vec<(String, String)>> {
+        use bollard::query_parameters::InspectContainerOptions;
+        let inspect = self
+            .docker
+            .inspect_container(container_id, None::<InspectContainerOptions>)
+            .await
+            .context("Failed to inspect container")?;
+
+        let env_vars = inspect
+            .config
+            .and_then(|config| config.env)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|env_str| {
+                let parts: Vec<&str> = env_str.splitn(2, '=').collect();
+                if parts.len() == 2 {
+                    Some((parts[0].to_string(), parts[1].to_string()))
+                } else {
+                    Some((env_str, String::new()))
+                }
+            })
+            .collect();
+
+        Ok(env_vars)
+    }
+
+    pub async fn get_image_info(&self, image_id: &str) -> Result<Option<eyes_devine_shared::ImageInfo>> {
+        let inspect = match self
+            .docker
+            .inspect_image(image_id)
+            .await
+        {
+            Ok(img) => img,
+            Err(e) => {
+                log::warn!("Failed to inspect image {}: {}", image_id, e);
+                return Ok(None);
+            }
+        };
+
+        let repo_tags = inspect
+            .repo_tags
+            .unwrap_or_default();
+
+        let size = inspect.size.map(|s| s as u64).unwrap_or(0);
+        
+        // bollard's ImageInspect.created is Option<String> in ISO 8601 format
+        let created = inspect.created
+            .and_then(|ts_str| {
+                // Try to parse as RFC3339/ISO8601 timestamp
+                chrono::DateTime::parse_from_rfc3339(&ts_str)
+                    .ok()
+                    .map(|dt| dt.with_timezone(&chrono::Utc))
+            });
+
+        let architecture = inspect.architecture;
+        let os = inspect.os;
+
+        // bollard's ImageInspect.id is Option<String>
+        let image_id_str = inspect.id
+            .unwrap_or_else(|| image_id.to_string());
+
+        Ok(Some(eyes_devine_shared::ImageInfo {
+            id: image_id_str,
+            repo_tags,
+            size,
+            created,
+            architecture,
+            os,
+        }))
+    }
+
+    pub async fn get_comprehensive_stats(&self) -> Result<eyes_devine_shared::ComprehensiveStats> {
+        let containers = self.list_containers().await?;
+        let total_containers = containers.len();
+        
+        let mut containers_up = 0;
+        let mut containers_down = 0;
+        let mut container_details = Vec::new();
+
+        for container in &containers {
+            let is_running = container.status.to_lowercase().contains("up") 
+                || container.status.to_lowercase().contains("running");
+            
+            if is_running {
+                containers_up += 1;
+            } else {
+                containers_down += 1;
+            }
+
+            // Get container stats (only if running)
+            let stats = if is_running {
+                self.get_container_stats(&container.id).await.unwrap_or_else(|e| {
+                    log::warn!("Failed to get stats for container {}: {}", container.id, e);
+                    // Return empty stats if we can't get them
+                    eyes_devine_shared::ContainerStats {
+                        container_id: container.id.clone(),
+                        container_name: container.name.clone(),
+                        cpu_usage_percent: 0.0,
+                        memory_usage_bytes: 0,
+                        memory_limit_bytes: 0,
+                        memory_usage_percent: 0.0,
+                        network_rx_bytes: 0,
+                        network_tx_bytes: 0,
+                        block_read_bytes: 0,
+                        block_write_bytes: 0,
+                        timestamp: chrono::Utc::now(),
+                    }
+                })
+            } else {
+                // Return empty stats for stopped containers
+                eyes_devine_shared::ContainerStats {
+                    container_id: container.id.clone(),
+                    container_name: container.name.clone(),
+                    cpu_usage_percent: 0.0,
+                    memory_usage_bytes: 0,
+                    memory_limit_bytes: 0,
+                    memory_usage_percent: 0.0,
+                    network_rx_bytes: 0,
+                    network_tx_bytes: 0,
+                    block_read_bytes: 0,
+                    block_write_bytes: 0,
+                    timestamp: chrono::Utc::now(),
+                }
+            };
+
+            // Get environment variables
+            let env_vars = self.get_container_environment(&container.id).await.unwrap_or_default();
+            let environment: Vec<eyes_devine_shared::ContainerEnvironment> = env_vars
+                .into_iter()
+                .map(|(key, value)| eyes_devine_shared::ContainerEnvironment { key, value })
+                .collect();
+
+            // Get image information
+            let image_info = self.get_image_info(&container.image).await.unwrap_or(None);
+
+            container_details.push(eyes_devine_shared::ContainerDetails {
+                container_id: container.id.clone(),
+                container_name: container.name.clone(),
+                image: container.image.clone(),
+                status: container.status.clone(),
+                is_running,
+                environment,
+                image_info,
+                stats,
+                created: container.created,
+            });
+        }
+
+        // Get total stats
+        let total_stats = self.get_total_stats().await?;
+
+        Ok(eyes_devine_shared::ComprehensiveStats {
+            total_containers,
+            containers_up,
+            containers_down,
+            total_stats,
+            containers: container_details,
+            timestamp: chrono::Utc::now(),
+        })
+    }
 }
 

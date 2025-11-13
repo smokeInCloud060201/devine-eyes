@@ -58,7 +58,7 @@ async fn main() -> std::io::Result<()> {
     let app_state = web::Data::new(AppState {
         docker_service,
         _db: db,
-        cache_service,
+        _cache_service: cache_service,
     });
 
     HttpServer::new(move || {

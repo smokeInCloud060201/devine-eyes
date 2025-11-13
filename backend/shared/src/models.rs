@@ -64,3 +64,42 @@ pub struct LogFilter {
     pub limit: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerEnvironment {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageInfo {
+    pub id: String,
+    pub repo_tags: Vec<String>,
+    pub size: u64,
+    pub created: Option<DateTime<Utc>>,
+    pub architecture: Option<String>,
+    pub os: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerDetails {
+    pub container_id: String,
+    pub container_name: String,
+    pub image: String,
+    pub status: String,
+    pub is_running: bool,
+    pub environment: Vec<ContainerEnvironment>,
+    pub image_info: Option<ImageInfo>,
+    pub stats: ContainerStats,
+    pub created: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComprehensiveStats {
+    pub total_containers: usize,
+    pub containers_up: usize,
+    pub containers_down: usize,
+    pub total_stats: TotalStats,
+    pub containers: Vec<ContainerDetails>,
+    pub timestamp: DateTime<Utc>,
+}
+

@@ -1,30 +1,37 @@
 [package]
 name = "frontend"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Leptos
-leptos = { version = "0.8.0", features = ["csr"] }
-leptos_meta = { version = "0.8.0" }
-leptos_router = { version = "0.8.0" }
+leptos = { version = "0.8.12", features = ["csr"] }
+leptos_meta = { version = "0.8.5" }
+leptos_router = { version = "0.8.9" }
+
+# Shared models
+eyes-devine-shared = { path = "../backend/shared" }
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde-wasm-bindgen = "0.6"
+serde = { version = "1.0.228", features = ["derive"] }
+serde-wasm-bindgen = "0.6.5"
+serde_json = "1.0.145"
 
 # Time handling
-chrono = { version = "0.4", features = ["wasmbind", "serde"] }
+chrono = { version = "0.4.42", features = ["wasmbind", "serde"] }
 
 # Web
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-web-sys = "0.3"
-js-sys = "0.3"
-console_error_panic_hook = "0.1"
+wasm-bindgen = "0.2.105"
+wasm-bindgen-futures = "0.4.55"
+web-sys = "0.3.82"
+js-sys = "0.3.82"
+console_error_panic_hook = "0.1.7"
+
+# Collections
+indexmap = "2.12.0"
 
 [profile.release]
 opt-level = "z"

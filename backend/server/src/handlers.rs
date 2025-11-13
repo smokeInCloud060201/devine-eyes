@@ -1,33 +1,27 @@
-use eyes_devine_shared::{ContainerLog, LogFilter, TotalStats};
+use eyes_devine_shared::{ContainerLog, LogFilter};
 use eyes_devine_services::{CacheService, DockerService};
-use actix_web::{web, HttpResponse, Responder};
+use actix_web::{web, HttpResponse, Responder, Error};
+use actix_web::web::Bytes;
 use chrono::Utc;
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
+use futures::stream;
 use std::time::Duration;
+use tokio::time::interval;
 
 pub struct AppState {
     pub docker_service: Arc<DockerService>,
+    /// Database connection (optional, reserved for future use - not currently used for stats/containers)
     pub _db: Option<DatabaseConnection>,
-    pub cache_service: Arc<CacheService>,
+    /// Cache service (optional, reserved for future use - stats/containers are fetched real-time)
+    pub _cache_service: Arc<CacheService>,
 }
 
+/// Get total stats aggregated from all containers (real-time from Docker)
+/// This is kept for backward compatibility, but the SSE endpoint is preferred
 pub async fn get_total_stats(state: web::Data<AppState>) -> impl Responder {
-    // Try to get from cache first
-    if state.cache_service.is_enabled() {
-        if let Ok(Some(cached_stats)) = state.cache_service.get::<TotalStats>("total_stats").await {
-            return HttpResponse::Ok().json(cached_stats);
-        }
-    }
-
     match state.docker_service.get_total_stats().await {
-        Ok(stats) => {
-            // Cache the result for 5 seconds
-            if state.cache_service.is_enabled() {
-                let _ = state.cache_service.set("total_stats", &stats, Some(Duration::from_secs(5))).await;
-            }
-            HttpResponse::Ok().json(stats)
-        }
+        Ok(stats) => HttpResponse::Ok().json(stats),
         Err(e) => {
             log::error!("Failed to get total stats: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
@@ -37,6 +31,46 @@ pub async fn get_total_stats(state: web::Data<AppState>) -> impl Responder {
     }
 }
 
+/// SSE endpoint for comprehensive stats - streams data every 2 seconds
+pub async fn get_total_stats_sse(state: web::Data<AppState>) -> Result<HttpResponse, Error> {
+    let docker_service = state.docker_service.clone();
+    
+    let stream = stream::unfold((docker_service, interval(Duration::from_secs(2))), |(docker_service, mut interval)| async move {
+        interval.tick().await;
+        
+        let result = match docker_service.get_comprehensive_stats().await {
+            Ok(stats) => {
+                match serde_json::to_string(&stats) {
+                    Ok(json) => {
+                        let data = format!("data: {}\n\n", json);
+                        Ok::<Bytes, Error>(Bytes::from(data))
+                    }
+                    Err(e) => {
+                        log::error!("Failed to serialize stats: {}", e);
+                        let error_data = format!("data: {{\"error\":\"Failed to serialize stats: {}\"}}\n\n", e);
+                        Ok(Bytes::from(error_data))
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("Failed to get comprehensive stats: {}", e);
+                let error_data = format!("data: {{\"error\":\"Failed to get stats: {}\"}}\n\n", e);
+                Ok(Bytes::from(error_data))
+            }
+        };
+        
+        Some((result, (docker_service, interval)))
+    });
+
+    Ok(HttpResponse::Ok()
+        .content_type("text/event-stream")
+        .append_header(("Cache-Control", "no-cache"))
+        .append_header(("Connection", "keep-alive"))
+        .append_header(("X-Accel-Buffering", "no"))
+        .streaming(stream))
+}
+
+/// List all containers (real-time from Docker)
 pub async fn get_all_containers(state: web::Data<AppState>) -> impl Responder {
     match state.docker_service.list_containers().await {
         Ok(containers) => HttpResponse::Ok().json(containers),
@@ -49,6 +83,7 @@ pub async fn get_all_containers(state: web::Data<AppState>) -> impl Responder {
     }
 }
 
+/// Get stats for a specific container (real-time from Docker)
 pub async fn get_container_stats(
     state: web::Data<AppState>,
     path: web::Path<String>,
@@ -65,6 +100,7 @@ pub async fn get_container_stats(
     }
 }
 
+/// Get stats for all containers (real-time from Docker)
 pub async fn get_all_container_stats(state: web::Data<AppState>) -> impl Responder {
     match state.docker_service.get_all_container_stats().await {
         Ok(stats) => HttpResponse::Ok().json(stats),
@@ -77,6 +113,7 @@ pub async fn get_all_container_stats(state: web::Data<AppState>) -> impl Respond
     }
 }
 
+/// Get logs for a specific container (real-time from Docker)
 pub async fn get_container_logs(
     state: web::Data<AppState>,
     path: web::Path<String>,

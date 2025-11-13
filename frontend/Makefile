@@ -16,7 +16,7 @@ dev:
 
 # Hot reload development server with trunk
 watch:
-	trunk serve
+	trunk serve --port 4000
 
 # Build with trunk (for production)
 serve:
