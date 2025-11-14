@@ -12,21 +12,59 @@ pub struct DataPoint {
     pub network: f64, // Combined RX + TX in KB/s
 }
 
+#[derive(Clone)]
+pub struct MetricSeries {
+    pub name: String,
+    pub color: String,
+    pub metrics: Vec<f64>,
+}
+
+// Helper function to parse color string to RGBColor
+fn parse_color(color_str: &str) -> RGBColor {
+    let color_str = color_str.trim();
+    
+    // Handle hex colors like "#FFC107" or "FFC107"
+    if color_str.starts_with('#') {
+        let hex = &color_str[1..];
+        if hex.len() == 6 {
+            if let (Ok(r), Ok(g), Ok(b)) = (
+                u8::from_str_radix(&hex[0..2], 16),
+                u8::from_str_radix(&hex[2..4], 16),
+                u8::from_str_radix(&hex[4..6], 16),
+            ) {
+                return RGBColor(r, g, b);
+            }
+        }
+    } else if color_str.len() == 6 {
+        // Hex without #
+        if let (Ok(r), Ok(g), Ok(b)) = (
+            u8::from_str_radix(&color_str[0..2], 16),
+            u8::from_str_radix(&color_str[2..4], 16),
+            u8::from_str_radix(&color_str[4..6], 16),
+        ) {
+            return RGBColor(r, g, b);
+        }
+    }
+    
+    // Default to white if parsing fails
+    RGBColor(255, 255, 255)
+}
+
 #[component]
 pub fn MetricsChart(
-    data_points: ReadSignal<Vec<DataPoint>>,
+    series: ReadSignal<Vec<MetricSeries>>,
     width: u32,
     height: u32,
 ) -> impl IntoView {
     let chart_ref = NodeRef::<html::Div>::new();
 
     Effect::new(move |_| {
-        let points = data_points.get();
+        let metric_series = series.get();
         
         if let Some(element) = chart_ref.get() {
             let html_element: &HtmlElement = element.dyn_ref().unwrap();
             
-            if points.is_empty() {
+            if metric_series.is_empty() {
                 html_element.set_inner_html(&format!(
                     r#"<div style="width: {}px; height: {}px; background: #1e1e1e; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #999; font-size: 12px;">No data</div>"#,
                     width, height
@@ -34,17 +72,28 @@ pub fn MetricsChart(
                 return;
             }
 
-            // Calculate ranges
-            let (min_time, max_time) = if points.len() > 1 {
-                (points[0].timestamp, points[points.len() - 1].timestamp)
-            } else {
-                let t = points[0].timestamp;
-                (t - 120.0, t) // Default 2 minute window
-            };
+            // Find the maximum length of metrics arrays
+            let max_length = metric_series.iter()
+                .map(|s| s.metrics.len())
+                .max()
+                .unwrap_or(0);
 
-            let max_cpu = points.iter().map(|p| p.cpu).fold(0.0, f64::max).max(100.0);
-            let max_memory = points.iter().map(|p| p.memory).fold(0.0, f64::max).max(100.0);
-            let max_network = points.iter().map(|p| p.network).fold(0.0, f64::max) * 1.1;
+            if max_length == 0 {
+                html_element.set_inner_html(&format!(
+                    r#"<div style="width: {}px; height: {}px; background: #1e1e1e; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #999; font-size: 12px;">No data</div>"#,
+                    width, height
+                ));
+                return;
+            }
+
+            // Calculate the maximum value across all series for y-axis
+            let max_value = metric_series.iter()
+                .flat_map(|s| s.metrics.iter().copied())
+                .fold(0.0f64, |acc, val| acc.max(val))
+                .max(1.0f64) * 1.1; // Add 10% padding
+
+            // X-axis range: 0 to max_length - 1
+            let x_max = (max_length as f64 - 1.0).max(1.0);
 
             // Create SVG backend
             let mut buffer = String::new();
@@ -61,8 +110,8 @@ pub fn MetricsChart(
                     .x_label_area_size(0)
                     .y_label_area_size(0)
                     .build_cartesian_2d(
-                        min_time..max_time.max(min_time + 1.0),
-                        0.0..max_cpu.max(1.0),
+                        0.0..x_max,
+                        0.0..max_value,
                     )
                     .unwrap();
 
@@ -76,28 +125,33 @@ pub fn MetricsChart(
                     .draw()
                     .unwrap();
 
-                // Draw CPU line (yellow)
-                let cpu_points: Vec<(f64, f64)> = points.iter().map(|p| (p.timestamp, p.cpu)).collect();
-                chart.draw_series(std::iter::once(PathElement::new(
-                    cpu_points,
-                    &RGBColor(255, 193, 7),
-                ))).unwrap();
+                // Draw each metric series as a line
+                for series_data in &metric_series {
+                    if series_data.metrics.is_empty() {
+                        continue;
+                    }
 
-                // Draw Memory line (blue) - need to scale to same range
-                let mem_scale = max_cpu / max_memory.max(1.0);
-                let mem_points: Vec<(f64, f64)> = points.iter().map(|p| (p.timestamp, p.memory * mem_scale)).collect();
-                chart.draw_series(std::iter::once(PathElement::new(
-                    mem_points,
-                    &RGBColor(33, 150, 243),
-                ))).unwrap();
+                    let color = parse_color(&series_data.color);
+                    
+                    // Create points: (index, value)
+                    let points: Vec<(f64, f64)> = series_data.metrics.iter()
+                        .enumerate()
+                        .map(|(i, &value)| (i as f64, value))
+                        .collect();
 
-                // Draw Network line (green) - scale to same range
-                let net_scale = max_cpu / max_network.max(1.0);
-                let net_points: Vec<(f64, f64)> = points.iter().map(|p| (p.timestamp, p.network * net_scale)).collect();
-                chart.draw_series(std::iter::once(PathElement::new(
-                    net_points,
-                    &RGBColor(76, 175, 80),
-                ))).unwrap();
+                    // Draw the line
+                    chart.draw_series(std::iter::once(PathElement::new(
+                        points.clone(),
+                        color,
+                    ))).unwrap();
+
+                    // Draw data points (circles) on the line
+                    chart.draw_series(
+                        points.iter().map(|&point| {
+                            Circle::new(point, 3, color.filled())
+                        })
+                    ).unwrap();
+                }
             }
 
             html_element.set_inner_html(&buffer);

@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use eyes_devine_shared::{ContainerInfo, ContainerStats};
 use crate::utils::format_bytes;
-use crate::components::{MetricsChart, DataPoint};
+use crate::components::{MetricsChart, DataPoint, MetricSeries};
 use indexmap::IndexMap;
 use std::sync::Arc;
 
@@ -19,16 +19,43 @@ pub fn ContainerCard(
         .unwrap_or_else(|| container.name.clone());
 
     let has_stats = stats.is_some();
-    let (chart_data, set_chart_data) = signal(Vec::<DataPoint>::new());
+    let (chart_series, set_chart_series) = signal(Vec::<MetricSeries>::new());
 
-    // Update chart data reactively
+    // Update chart data reactively and convert to MetricSeries format
     Effect::new(move |_| {
         let data = historical_data
             .get()
             .get(&container_id)
             .cloned()
             .unwrap_or_default();
-        set_chart_data.set(data);
+        
+        // Convert DataPoint to MetricSeries format
+        if !data.is_empty() {
+            let cpu_metrics: Vec<f64> = data.iter().map(|p| p.cpu).collect();
+            let mem_metrics: Vec<f64> = data.iter().map(|p| p.memory).collect();
+            let net_metrics: Vec<f64> = data.iter().map(|p| p.network).collect();
+            
+            let series = vec![
+                MetricSeries {
+                    name: "CPU".to_string(),
+                    color: "#FFC107".to_string(),
+                    metrics: cpu_metrics,
+                },
+                MetricSeries {
+                    name: "Memory".to_string(),
+                    color: "#2196F3".to_string(),
+                    metrics: mem_metrics,
+                },
+                MetricSeries {
+                    name: "Network".to_string(),
+                    color: "#4CAF50".to_string(),
+                    metrics: net_metrics,
+                },
+            ];
+            set_chart_series.set(series);
+        } else {
+            set_chart_series.set(Vec::new());
+        }
     });
 
     // Extract formatted stats strings before closures to avoid FnOnce issues
@@ -54,7 +81,7 @@ pub fn ContainerCard(
             <div class="container-info">{"Status: "} {container.status.clone()}</div>
 
             // Stats available & chart data not empty
-            <Show when=move || has_stats && !chart_data.get().is_empty()>
+            <Show when=move || has_stats && !chart_series.get().is_empty()>
                 {
                     let stats_tuple_clone = Arc::clone(&stats_tuple_1);
                     move || {
@@ -62,7 +89,7 @@ pub fn ContainerCard(
                         view! {
                             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd;">
                                 <div style="margin-bottom: 10px;">
-                                    <MetricsChart data_points=chart_data width=300 height=120/>
+                                    <MetricsChart series=chart_series width=300 height=120/>
                                 </div>
                                 <div class="container-info" style="font-size: 0.85em; color: #666;">
                                     <span style="color: #FFC107;">"●"</span> " CPU  "
@@ -82,7 +109,7 @@ pub fn ContainerCard(
             </Show>
 
             // Stats available & chart data empty
-            <Show when=move || has_stats && chart_data.get().is_empty()>
+            <Show when=move || has_stats && chart_series.get().is_empty()>
                 {
                     let stats_tuple_clone = Arc::clone(&stats_tuple_2);
                     move || {

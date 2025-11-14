@@ -173,18 +173,40 @@ pub fn connect_sse_stats(
     // EventSource automatically parses "data: {...}\n\n" and gives us just the JSON in event.data()
     let onmessage_callback = Closure::wrap(Box::new(move |event: web_sys::MessageEvent| {
         if let Some(data) = event.data().as_string() {
+            // Log raw data length for debugging (truncate if too long)
+            let data_preview = if data.len() > 500 {
+                format!("{}... (truncated, total length: {})", &data[..500], data.len())
+            } else {
+                data.clone()
+            };
+            web_sys::console::log_1(&format!("Received SSE data (length: {}): {}", data.len(), data_preview).into());
+            
             // Parse the JSON data
             match serde_json::from_str::<ComprehensiveStats>(&data) {
                 Ok(stats) => {
-                    web_sys::console::log_1(&format!("Received SSE data: {} containers", stats.containers.len()).into());
+                    web_sys::console::log_1(&format!("Successfully parsed SSE data: {} containers", stats.containers.len()).into());
                     set_comprehensive_stats_clone.set(Some(stats));
                     set_error_clone.set(None);
                 }
                 Err(e) => {
-                    web_sys::console::error_1(&format!("Failed to parse SSE data: {}", e).into());
-                    set_error_clone.set(Some(format!("Parse error: {}", e)));
+                    let error_msg = format!("Failed to parse SSE data: {} (at line {} column {})", 
+                        e, 
+                        e.line(), 
+                        e.column()
+                    );
+                    web_sys::console::error_1(&error_msg.clone().into());
+                    // Also log a sample of the problematic JSON
+                    let json_sample = if data.len() > 1000 {
+                        format!("{}...", &data[..1000])
+                    } else {
+                        data.clone()
+                    };
+                    web_sys::console::error_1(&format!("JSON sample: {}", json_sample).into());
+                    set_error_clone.set(Some(error_msg));
                 }
             }
+        } else {
+            web_sys::console::warn_1(&"SSE message data is not a string".into());
         }
     }) as Box<dyn FnMut(_)>);
     

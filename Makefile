@@ -10,7 +10,7 @@ help:
 	@echo "  migrate-status  - Show migration status"
 
 docker-up:
-	docker-compose up -d
+	docker-compose -f ./deploy/docker-compose.yml up -d
 
 docker-down:
 	docker-compose down

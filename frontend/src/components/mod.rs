@@ -10,5 +10,5 @@ pub use container_card::ContainerCard;
 pub use containers_view::ContainersView;
 pub use total_stats_view::TotalStatsView;
 pub use logs_view::LogsView;
-pub use metrics_chart::{MetricsChart, DataPoint};
+pub use metrics_chart::{MetricsChart, DataPoint, MetricSeries};
 
