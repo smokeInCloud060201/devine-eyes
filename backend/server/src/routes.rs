@@ -3,7 +3,8 @@ use actix_web::web;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg
-        .route("/api/stats/total", web::get().to(handlers::get_total_stats_sse))
+        .route("/api/stats/total", web::get().to(handlers::get_total_stats))
+        .route("/api/stats/total/sse", web::get().to(handlers::get_total_stats_sse))
         .route("/api/containers", web::get().to(handlers::get_all_containers))
         .route(
             "/api/containers/{id}/stats",

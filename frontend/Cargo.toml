@@ -33,6 +33,9 @@ console_error_panic_hook = "0.1.7"
 # Collections
 indexmap = "2.12.0"
 
+# Charting - Plotters (pure Rust, WASM support)
+plotters = { version = "0.3.7", default-features = false, features = ["svg_backend"] }
+
 [profile.release]
 opt-level = "z"
 lto = true

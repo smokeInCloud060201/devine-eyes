@@ -5,7 +5,7 @@ use actix_web::web::Bytes;
 use chrono::Utc;
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
-use futures::stream;
+use futures::stream::{self, StreamExt, once};
 use std::time::Duration;
 use tokio::time::interval;
 
@@ -18,14 +18,16 @@ pub struct AppState {
 }
 
 /// Get total stats aggregated from all containers (real-time from Docker)
-/// This is kept for backward compatibility, but the SSE endpoint is preferred
+/// Returns comprehensive stats wrapped in a data field
 pub async fn get_total_stats(state: web::Data<AppState>) -> impl Responder {
-    match state.docker_service.get_total_stats().await {
-        Ok(stats) => HttpResponse::Ok().json(stats),
+    match state.docker_service.get_comprehensive_stats().await {
+        Ok(stats) => HttpResponse::Ok().json(serde_json::json!({
+            "data": stats
+        })),
         Err(e) => {
-            log::error!("Failed to get total stats: {}", e);
+            log::error!("Failed to get comprehensive stats: {}", e);
             HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("Failed to get total stats: {}", e)
+                "error": format!("Failed to get comprehensive stats: {}", e)
             }))
         }
     }
@@ -35,38 +37,56 @@ pub async fn get_total_stats(state: web::Data<AppState>) -> impl Responder {
 pub async fn get_total_stats_sse(state: web::Data<AppState>) -> Result<HttpResponse, Error> {
     let docker_service = state.docker_service.clone();
     
-    let stream = stream::unfold((docker_service, interval(Duration::from_secs(2))), |(docker_service, mut interval)| async move {
+    // Helper function to format stats as SSE data
+    let format_stats = |stats: eyes_devine_shared::ComprehensiveStats| -> Result<Bytes, Error> {
+        match serde_json::to_string(&stats) {
+            Ok(json) => {
+                let data = format!("data: {}\n\n", json);
+                Ok(Bytes::from(data))
+            }
+            Err(e) => {
+                log::error!("Failed to serialize stats: {}", e);
+                let error_data = format!("data: {{\"error\":\"Failed to serialize stats: {}\"}}\n\n", e);
+                Ok(Bytes::from(error_data))
+            }
+        }
+    };
+    
+    // Send first message immediately
+    let first_message = match docker_service.get_comprehensive_stats().await {
+        Ok(stats) => format_stats(stats)?,
+        Err(e) => {
+            log::error!("Failed to get comprehensive stats: {}", e);
+            Bytes::from(format!("data: {{\"error\":\"Failed to get stats: {}\"}}\n\n", e))
+        }
+    };
+    
+    // Create stream for subsequent messages (every 2 seconds)
+    let interval_stream = stream::unfold((docker_service, interval(Duration::from_secs(2))), move |(docker_service, mut interval)| async move {
         interval.tick().await;
         
         let result = match docker_service.get_comprehensive_stats().await {
-            Ok(stats) => {
-                match serde_json::to_string(&stats) {
-                    Ok(json) => {
-                        let data = format!("data: {}\n\n", json);
-                        Ok::<Bytes, Error>(Bytes::from(data))
-                    }
-                    Err(e) => {
-                        log::error!("Failed to serialize stats: {}", e);
-                        let error_data = format!("data: {{\"error\":\"Failed to serialize stats: {}\"}}\n\n", e);
-                        Ok(Bytes::from(error_data))
-                    }
-                }
-            }
+            Ok(stats) => format_stats(stats),
             Err(e) => {
                 log::error!("Failed to get comprehensive stats: {}", e);
-                let error_data = format!("data: {{\"error\":\"Failed to get stats: {}\"}}\n\n", e);
-                Ok(Bytes::from(error_data))
+                Ok(Bytes::from(format!("data: {{\"error\":\"Failed to get stats: {}\"}}\n\n", e)))
             }
         };
         
         Some((result, (docker_service, interval)))
     });
+    
+    // Combine first message with interval stream
+    let stream = once(async move { Ok::<Bytes, Error>(first_message) })
+        .chain(interval_stream);
 
     Ok(HttpResponse::Ok()
         .content_type("text/event-stream")
         .append_header(("Cache-Control", "no-cache"))
         .append_header(("Connection", "keep-alive"))
         .append_header(("X-Accel-Buffering", "no"))
+        .append_header(("Access-Control-Allow-Origin", "*"))
+        .append_header(("Access-Control-Allow-Headers", "Cache-Control"))
         .streaming(stream))
 }
 

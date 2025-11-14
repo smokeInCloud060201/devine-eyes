@@ -12,6 +12,8 @@ frontend/dist/
 
 # Environment
 backend/.env
+backend/target/
+migrations/target/
 migrations/.env
 .env.local
 
