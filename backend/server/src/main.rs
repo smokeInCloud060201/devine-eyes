@@ -1,13 +1,15 @@
 mod config;
 mod handlers;
 mod routes;
+mod query_validation;
 
 use actix_web::{web, App, HttpServer};
 use config::Config;
 use handlers::AppState;
-use eyes_devine_services::{CacheService, DockerService, create_connection};
+use eyes_devine_services::{CacheService, DockerService, QueryService, CachedQueryService, create_connection};
 use std::sync::Arc;
 use actix_cors::Cors;
+use crate::query_validation::HistoryQueryValidator;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -39,26 +41,43 @@ async fn main() -> std::io::Result<()> {
     }
 
     // Initialize database if URL is provided
-    let db = if !config.database_url.is_empty() {
+    let (db, query_service) = if !config.database_url.is_empty() {
         match create_connection(&config.database_url).await {
             Ok(conn) => {
                 log::info!("Database connection established");
                 log::info!("Note: Run migrations with 'cd migrations && cargo run -- up' if not already done");
-                Some(conn)
+                let base_qs = Arc::new(QueryService::new(conn.clone()));
+                let cached_qs = Arc::new(CachedQueryService::new(
+                    base_qs,
+                    cache_service.clone(),
+                    config.cache_ttl_containers,
+                    config.cache_ttl_stats,
+                    config.cache_ttl_images,
+                    config.cache_ttl_history,
+                ));
+                (Some(conn), Some(cached_qs))
             }
             Err(e) => {
                 log::warn!("Failed to connect to database: {}. Continuing without database.", e);
-                None
+                (None, None)
             }
         }
     } else {
-        None
+        (None, None)
     };
+
+    // Create query validator
+    let query_validator = HistoryQueryValidator::new(
+        config.max_query_range_days,
+        config.max_results_per_query,
+    );
 
     let app_state = web::Data::new(AppState {
         docker_service,
-        _db: db,
-        _cache_service: cache_service,
+        db,
+        query_service,
+        cache_service,
+        query_validator,
     });
 
     HttpServer::new(move || {

@@ -13,4 +13,5 @@ sea-orm-migration = { version = "2.0.0-rc.18", features = ["sqlx-postgres", "run
 tokio = { version = "1.48.0", features = ["full"] }
 dotenv = "0.15"
 async-trait = "0.1"
+log = "0.4.28"
 

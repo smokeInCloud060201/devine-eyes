@@ -9,12 +9,15 @@ backend/site/
 frontend/target/
 frontend/pkg/
 frontend/dist/
+frontend/node_modules/
 
 # Environment
 backend/.env
 backend/target/
 migrations/target/
 migrations/.env
+worker/.env
+worker/target/
 .env.local
 
 # IDE

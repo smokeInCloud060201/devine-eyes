@@ -10,10 +10,18 @@ help:
 	@echo "  migrate-status  - Show migration status"
 
 docker-up:
-	docker-compose -f ./deploy/docker-compose.yml up -d
+	@echo "Starting Docker containers..."
+	@docker-compose -f ./deploy/docker-compose.yml down 2>/dev/null || true
+	@docker network rm deploy_default 2>/dev/null || true
+	@docker-compose -f ./deploy/docker-compose.yml up -d
+	@echo "Containers started successfully!"
 
 docker-down:
-	docker-compose down
+	docker-compose -f ./deploy/docker-compose.yml down
+
+docker-clean:
+	docker-compose -f ./deploy/docker-compose.yml down -v
+	docker rm -f docker-monitor-postgres docker-monitor-redis 2>/dev/null || true
 
 migrate-up:
 	cd migrations && cargo run -- up

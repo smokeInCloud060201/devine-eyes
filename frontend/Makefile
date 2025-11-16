@@ -1,28 +1,38 @@
-.PHONY: build dev watch clean serve
+.PHONY: install build dev preview lint format format-check type-check clean
 
-# Production build (for backend serving)
+# Install dependencies
+install:
+	npm install
+
+# Production build
 build:
-	wasm-pack build --target web --out-dir pkg --release
-	mkdir -p target/site
-	cp index.html target/site/
-	cp -r pkg target/site/pkg
+	npm run build
 
-# Development build (faster, larger binary)
+# Development server with hot reload
 dev:
-	wasm-pack build --target web --out-dir pkg
-	mkdir -p target/site
-	cp index.html target/site/
-	cp -r pkg target/site/pkg
+	npm run dev
 
-# Hot reload development server with trunk
-watch:
-	trunk serve --port 4000
+# Preview production build
+preview:
+	npm run preview
 
-# Build with trunk (for production)
-serve:
-	trunk build --release
+# Lint code
+lint:
+	npm run lint
+
+# Format code
+format:
+	npm run format
+
+# Check code formatting
+format-check:
+	npm run format:check
+
+# Type check
+type-check:
+	npm run type-check
 
 # Clean build artifacts
 clean:
-	rm -rf pkg target/site dist
+	rm -rf dist .rsbuild node_modules
 

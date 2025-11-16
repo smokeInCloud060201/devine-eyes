@@ -337,6 +337,92 @@ impl DockerService {
         Ok(env_vars)
     }
 
+    pub async fn get_container_network_info(&self, container_id: &str) -> Result<eyes_devine_shared::ContainerNetworkInfo> {
+        use bollard::query_parameters::InspectContainerOptions;
+        let inspect = self
+            .docker
+            .inspect_container(container_id, None::<InspectContainerOptions>)
+            .await
+            .context("Failed to inspect container")?;
+
+        let container_name = inspect
+            .name
+            .as_ref()
+            .map(|n| n.trim_start_matches('/').to_string())
+            .unwrap_or_else(|| container_id.to_string());
+
+        // Extract network information and port mappings
+        let mut networks = Vec::new();
+        let mut ip_addresses = Vec::new();
+        let mut ports = Vec::new();
+
+        if let Some(network_settings) = &inspect.network_settings {
+            // Extract networks
+            if let Some(networks_map) = &network_settings.networks {
+                for (network_name, endpoint_settings) in networks_map {
+                    let network_id = endpoint_settings
+                        .network_id
+                        .as_ref()
+                        .map(|s| s.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let ip_address = endpoint_settings
+                        .ip_address
+                        .as_ref()
+                        .map(|s| s.clone())
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let aliases = endpoint_settings
+                        .aliases
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_default();
+
+                    if ip_address != "unknown" {
+                        ip_addresses.push(ip_address.clone());
+                    }
+
+                    networks.push(eyes_devine_shared::NetworkInfo {
+                        network_name: network_name.clone(),
+                        network_id,
+                        ip_address,
+                        aliases,
+                    });
+                }
+            }
+
+            // Extract port mappings
+            if let Some(ports_map) = &network_settings.ports {
+                for (container_port_str, host_bindings) in ports_map {
+                    // Parse container port (format: "80/tcp" or "80/udp")
+                    let parts: Vec<&str> = container_port_str.split('/').collect();
+                    if parts.len() == 2 {
+                        if let Ok(container_port) = parts[0].parse::<u16>() {
+                            let protocol = parts[1].to_string();
+                            let host_port = host_bindings
+                                .as_ref()
+                                .and_then(|bindings| bindings.first())
+                                .and_then(|binding| binding.host_port.as_ref())
+                                .and_then(|port_str| port_str.parse::<u16>().ok());
+
+                            ports.push(eyes_devine_shared::PortMapping {
+                                container_port,
+                                host_port,
+                                protocol,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(eyes_devine_shared::ContainerNetworkInfo {
+            container_id: container_id.to_string(),
+            container_name,
+            networks,
+            ports,
+            ip_addresses,
+        })
+    }
+
     pub async fn get_image_info(&self, image_id: &str) -> Result<Option<eyes_devine_shared::ImageInfo>> {
         let inspect = match self
             .docker

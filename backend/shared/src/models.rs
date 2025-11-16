@@ -103,3 +103,82 @@ pub struct ComprehensiveStats {
     pub timestamp: DateTime<Utc>,
 }
 
+// Service Communication Detection Models
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum ConnectionType {
+    #[serde(rename = "environment_variable")]
+    EnvironmentVariable,
+    #[serde(rename = "same_network")]
+    SameNetwork,
+    #[serde(rename = "port_mapping")]
+    PortMapping,
+    #[serde(rename = "network_traffic")]
+    NetworkTraffic,
+    #[serde(rename = "image_based")]
+    ImageBased,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkInfo {
+    pub network_name: String,
+    pub network_id: String,
+    pub ip_address: String,
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PortMapping {
+    pub container_port: u16,
+    pub host_port: Option<u16>,
+    pub protocol: String, // "tcp", "udp"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContainerNetworkInfo {
+    pub container_id: String,
+    pub container_name: String,
+    pub networks: Vec<NetworkInfo>,
+    pub ports: Vec<PortMapping>,
+    pub ip_addresses: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceConnection {
+    pub source_container_id: String,
+    pub source_container_name: String,
+    pub source_image: String,
+    pub target_container_id: String,
+    pub target_container_name: String,
+    pub target_image: String,
+    pub connection_type: ConnectionType,
+    pub confidence: f64, // 0.0 to 1.0
+    pub evidence: Vec<String>, // e.g., ["DB_HOST=postgres", "Same network: bridge"]
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceNode {
+    pub container_id: String,
+    pub container_name: String,
+    pub image: String,
+    pub image_family: String, // e.g., "postgres", "redis", "nginx"
+    pub status: String,
+    pub networks: Vec<String>, // Network names
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceEdge {
+    pub from: String, // container_id
+    pub to: String,   // container_id
+    pub connection_type: ConnectionType,
+    pub confidence: f64,
+    pub evidence: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceMap {
+    pub nodes: Vec<ServiceNode>,
+    pub edges: Vec<ServiceEdge>,
+    pub timestamp: DateTime<Utc>,
+}
+
