@@ -5,6 +5,7 @@ import type {
   ContainerLog,
   ImageInfo,
   ServiceMap,
+  HttpRequest,
 } from '../types';
 
 const API_BASE =
@@ -115,5 +116,15 @@ export async function fetchServiceMap(serviceId?: string): Promise<ServiceMap> {
     ? `${API_BASE}/api/services/map?service_id=${encodeURIComponent(serviceId)}`
     : `${API_BASE}/api/services/map`;
   return fetchJson<ServiceMap>(url);
+}
+
+// HTTP Requests
+export async function fetchContainerHttpRequests(
+  containerId: string,
+  limit: number = 100
+): Promise<HttpRequest[]> {
+  return fetchJson<HttpRequest[]>(
+    `${API_BASE}/api/containers/${containerId}/requests?limit=${limit}`
+  );
 }
 

@@ -5,12 +5,14 @@ import type {
   ContainerLog,
   DataPoint,
   ServiceMap,
+  HttpRequest,
 } from '../types';
 import {
   fetchContainers,
   fetchContainerStats,
   fetchContainerLogs,
   fetchServiceMap,
+  fetchContainerHttpRequests,
 } from '../services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
@@ -30,12 +32,15 @@ const APM = () => {
   const [serviceStats, setServiceStats] = useState<ContainerStats | null>(null);
   const [serviceLogs, setServiceLogs] = useState<ContainerLog[]>([]);
   const [serviceMap, setServiceMap] = useState<ServiceMap | null>(null);
+  const [httpRequests, setHttpRequests] = useState<HttpRequest[]>([]);
   const [historicalData, setHistoricalData] = useState<DataPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logLimit, setLogLimit] = useState(100);
 
   const intervalRef = useRef<number | null>(null);
+
+  let isLoaded = false;
 
   // Load containers list
   useEffect(() => {
@@ -79,6 +84,10 @@ const APM = () => {
       const map = await fetchServiceMap(serviceId);
       setServiceMap(map);
 
+      // Load HTTP requests
+      const requests = await fetchContainerHttpRequests(serviceId, 100);
+      setHttpRequests(requests);
+
       // Update historical data
       const timestamp = new Date(stats.timestamp).getTime() / 1000;
       setHistoricalData((prev) => {
@@ -108,6 +117,8 @@ const APM = () => {
   useEffect(() => {
     if (selectedServiceId) {
       loadServiceDetails(selectedServiceId);
+
+      isLoaded = true;
       
       intervalRef.current = window.setInterval(() => {
         loadServiceDetails(selectedServiceId);
@@ -209,11 +220,11 @@ const APM = () => {
             </div>
           )}
 
-          {loading && (
+          {/* {loading && !isLoaded && (
             <div className="mb-4 p-4 text-center text-gray-600 bg-white rounded-lg">
               Loading service details...
             </div>
-          )}
+          )} */}
 
           {/* Service Overview */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
@@ -272,62 +283,115 @@ const APM = () => {
             </Card>
           </div>
 
-          {/* Request Monitoring */}
+          {/* HTTP Requests */}
           <Card className="mb-6">
             <CardHeader>
-              <CardTitle className="text-lg">Request Monitoring</CardTitle>
+              <CardTitle className="text-lg">HTTP Requests</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
                 <div className="text-sm text-gray-600 mb-4">
-                  Network activity and request patterns for this service
+                  Recent HTTP requests to this service (parsed from logs)
                 </div>
                 
-                {serviceStats ? (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-xs text-gray-500 mb-1">Total Requests (RX)</div>
-                      <div className="text-lg font-semibold">
-                        {formatBytes(serviceStats.network_rx_bytes)}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">Data received</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-xs text-gray-500 mb-1">Total Responses (TX)</div>
-                      <div className="text-lg font-semibold">
-                        {formatBytes(serviceStats.network_tx_bytes)}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">Data sent</div>
-                    </div>
-                    <div className="p-3 bg-gray-50 rounded-lg">
-                      <div className="text-xs text-gray-500 mb-1">Total Network</div>
-                      <div className="text-lg font-semibold">
-                        {formatBytes(serviceStats.network_rx_bytes + serviceStats.network_tx_bytes)}
-                      </div>
-                      <div className="text-xs text-gray-500 mt-1">Total traffic</div>
-                    </div>
+                {httpRequests.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200">
+                          <th className="text-left py-2 px-3 font-semibold text-gray-700">Time</th>
+                          <th className="text-left py-2 px-3 font-semibold text-gray-700">Method</th>
+                          <th className="text-left py-2 px-3 font-semibold text-gray-700">Endpoint</th>
+                          <th className="text-left py-2 px-3 font-semibold text-gray-700">Status</th>
+                          <th className="text-right py-2 px-3 font-semibold text-gray-700">Response Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {httpRequests.map((request, idx) => {
+                          const statusVariant = 
+                            request.http_status >= 200 && request.http_status < 300 ? 'success' :
+                            request.http_status >= 300 && request.http_status < 400 ? 'warning' :
+                            request.http_status >= 400 ? 'destructive' : 'secondary';
+                          
+                          const responseTimeColor = 
+                            request.response_time_ms < 100 ? 'text-green-600' :
+                            request.response_time_ms < 500 ? 'text-yellow-600' :
+                            'text-red-600';
+
+                          return (
+                            <tr
+                              key={`${request.container_id}-${request.timestamp}-${idx}`}
+                              className="border-b border-gray-100 hover:bg-gray-50 transition-colors"
+                            >
+                              <td className="py-2 px-3 text-gray-600">
+                                {formatDate(request.timestamp)}
+                              </td>
+                              <td className="py-2 px-3">
+                                <Badge variant="secondary" className="text-xs font-mono">
+                                  {request.method}
+                                </Badge>
+                              </td>
+                              <td className="py-2 px-3 font-mono text-gray-900">
+                                {request.endpoint}
+                              </td>
+                              <td className="py-2 px-3">
+                                <Badge variant={statusVariant} className="text-xs">
+                                  {request.http_status}
+                                </Badge>
+                              </td>
+                              <td className={`py-2 px-3 text-right font-semibold ${responseTimeColor}`}>
+                                {request.response_time_ms.toFixed(2)} ms
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 ) : (
-                  <div className="text-gray-500 text-sm">No network stats available</div>
+                  <div className="p-10 text-center text-gray-500">
+                    <p className="mb-2 font-semibold">No HTTP requests found in logs</p>
+                    <div className="text-xs text-gray-400 space-y-2 mt-4 text-left max-w-2xl mx-auto">
+                      <p>
+                        <strong>Why this happens:</strong> Your application may not be logging HTTP requests, 
+                        or the log format doesn't match supported patterns.
+                      </p>
+                      <p>
+                        <strong>Solutions:</strong>
+                      </p>
+                      <ol className="list-decimal list-inside space-y-1 ml-4">
+                        <li>
+                          <strong>Add HTTP logging to your application:</strong> Log requests in formats like:
+                          <code className="block bg-gray-100 p-2 rounded mt-1 font-mono text-xs">
+                            GET /api/users 200 45ms
+                          </code>
+                        </li>
+                        <li>
+                          <strong>Use a reverse proxy:</strong> Deploy nginx/traefik in front of services 
+                          to automatically log all requests
+                        </li>
+                        <li>
+                          <strong>Enable structured logging:</strong> Use JSON format:
+                          <code className="block bg-gray-100 p-2 rounded mt-1 font-mono text-xs">
+                            {`{"method":"GET","path":"/api/users","status":200,"duration":45.2}`}
+                          </code>
+                        </li>
+                        <li>
+                          <strong>Network-level monitoring:</strong> Future enhancement will capture requests 
+                          directly from network traffic (no application changes needed)
+                        </li>
+                      </ol>
+                      {serviceStats && (serviceStats.network_rx_bytes > 0 || serviceStats.network_tx_bytes > 0) && (
+                        <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded">
+                          <p className="text-yellow-800">
+                            <strong>Note:</strong> Network activity detected but no HTTP requests parsed. 
+                            This suggests your application is receiving traffic but not logging it in a parseable format.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
-
-                <Separator className="my-4" />
-
-                <div className="text-sm text-gray-500">
-                  <p className="mb-2">
-                    <strong>Note:</strong> Detailed endpoint monitoring (HTTP methods, status codes, endpoints) 
-                    requires request interception middleware or proxy integration.
-                  </p>
-                  <p>
-                    Current monitoring shows aggregate network traffic. To track individual requests, 
-                    consider integrating with:
-                  </p>
-                  <ul className="list-disc list-inside mt-2 space-y-1 text-xs">
-                    <li>API Gateway or reverse proxy (nginx, traefik)</li>
-                    <li>Application-level request logging</li>
-                    <li>Service mesh (Istio, Linkerd)</li>
-                  </ul>
-                </div>
               </div>
             </CardContent>
           </Card>

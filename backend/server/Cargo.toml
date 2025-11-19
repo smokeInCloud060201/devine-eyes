@@ -27,3 +27,6 @@ futures = { workspace = true }
 eyes-devine-services = { path = "../services" }
 eyes-devine-shared = { path = "../shared" }
 
+# Additional dependencies for HTTP request parsing
+regex = "1.10"
+

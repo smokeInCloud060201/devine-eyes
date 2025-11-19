@@ -18,3 +18,8 @@ log = { workspace = true }
 # Local dependencies
 eyes-devine-shared = { path = "../shared" }
 
+# Network monitoring
+tokio = { workspace = true }
+httparse = "1.10"
+pcap = { workspace = true }
+

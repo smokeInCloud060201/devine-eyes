@@ -1,6 +1,42 @@
 version: '3.8'
 
 services:
+
+  eyes-devine-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        RUST_VERSION: 1.75.0
+        APP_NAME: eyes-devine-server
+    container_name: eyes-devine-server
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DATABASE_URL=postgresql://user:password@postgres:5432/eyes_devine
+      - REDIS_URL=redis://redis:6379
+      - CACHE_TTL_CONTAINERS=60
+      - CACHE_TTL_STATS=30
+      - CACHE_TTL_IMAGES=300
+      - CACHE_TTL_HISTORY=60
+      - MAX_QUERY_RANGE_DAYS=30
+      - MAX_RESULTS_PER_QUERY=10000
+      - RUST_LOG=info
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - eyes-devine-network
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+
   postgres:
     image: timescale/timescaledb:latest-pg18
     container_name: docker-monitor-postgres

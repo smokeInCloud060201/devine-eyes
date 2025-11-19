@@ -38,6 +38,12 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
         )
         
         // Service map endpoint
-        .route("/api/services/map", web::get().to(handlers::get_service_map));
+        .route("/api/services/map", web::get().to(handlers::get_service_map))
+        
+        // HTTP requests endpoint
+        .route(
+            "/api/containers/{id}/requests",
+            web::get().to(handlers::get_container_http_requests),
+        );
 }
 

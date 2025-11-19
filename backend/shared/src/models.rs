@@ -182,3 +182,16 @@ pub struct ServiceMap {
     pub timestamp: DateTime<Utc>,
 }
 
+// HTTP Request Tracking Models
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpRequest {
+    pub container_id: String,
+    pub container_name: String,
+    pub endpoint: String,        // e.g., "/api/users", "/health"
+    pub method: String,          // e.g., "GET", "POST", "PUT", "DELETE"
+    pub http_status: u16,        // e.g., 200, 404, 500
+    pub response_time_ms: f64,   // Response time in milliseconds
+    pub timestamp: DateTime<Utc>,
+}
+

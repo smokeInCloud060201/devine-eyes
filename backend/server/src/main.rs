@@ -6,7 +6,7 @@ mod query_validation;
 use actix_web::{web, App, HttpServer};
 use config::Config;
 use handlers::AppState;
-use eyes_devine_services::{CacheService, DockerService, QueryService, CachedQueryService, create_connection};
+use eyes_devine_services::{CacheService, DockerService, QueryService, CachedQueryService, create_connection, NetworkMonitorService};
 use std::sync::Arc;
 use actix_cors::Cors;
 use crate::query_validation::HistoryQueryValidator;
@@ -72,12 +72,24 @@ async fn main() -> std::io::Result<()> {
         config.max_results_per_query,
     );
 
+    // Initialize network monitor for HTTP request capture
+    let network_monitor = Arc::new(NetworkMonitorService::new(docker_service.clone()));
+    let network_monitor_for_start = Arc::clone(&network_monitor);
+    
+    // Start network monitoring in background (non-blocking)
+    tokio::spawn(async move {
+        if let Err(e) = network_monitor_for_start.start_monitoring().await {
+            log::warn!("Failed to start network monitoring: {}. Will use log parsing as fallback.", e);
+        }
+    });
+
     let app_state = web::Data::new(AppState {
         docker_service,
         db,
         query_service,
         cache_service,
         query_validator,
+        network_monitor: Some(network_monitor),
     });
 
     HttpServer::new(move || {

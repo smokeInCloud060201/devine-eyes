@@ -91,3 +91,14 @@ export interface ServiceMap {
   timestamp: string;
 }
 
+// HTTP Request Tracking Types
+export interface HttpRequest {
+  container_id: string;
+  container_name: string;
+  endpoint: string;
+  method: string; // GET, POST, PUT, DELETE, etc.
+  http_status: number;
+  response_time_ms: number;
+  timestamp: string;
+}
+
