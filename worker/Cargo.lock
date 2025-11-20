@@ -985,6 +985,7 @@ dependencies = [
  "eyes-devine-services",
  "eyes-devine-shared",
  "log",
+ "regex",
  "sea-orm",
  "serde",
  "serde_json",

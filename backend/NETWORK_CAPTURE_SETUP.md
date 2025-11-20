@@ -2,75 +2,64 @@
 
 ## Overview
 
-The system now supports network-level packet capture to automatically monitor HTTP requests from Docker containers, regardless of application logging.
+The system now supports **cross-platform** network-level packet capture to automatically monitor HTTP requests from Docker containers, regardless of application logging.
+
+**✅ Supported Platforms:**
+- Linux (libpcap)
+- macOS (libpcap - built-in)
+- Windows (Npcap/WinPcap)
 
 ## Architecture
 
-1. **NetworkMonitorService**: Captures packets from Docker network interfaces
+1. **NetworkMonitorService**: Captures packets from Docker network interfaces (cross-platform)
 2. **HTTP Parser**: Extracts HTTP method, path, status, and response time from packets
 3. **Container Mapping**: Maps captured requests to containers by IP address
 4. **Hybrid Approach**: Falls back to log parsing if network capture is unavailable
 
-## Requirements
+## Quick Start
 
-### Linux (Recommended)
-- Root privileges or `CAP_NET_RAW` capability
-- `libpcap` development libraries installed
-- Docker network interfaces accessible
+See **[CROSS_PLATFORM_NETWORK_CAPTURE.md](./CROSS_PLATFORM_NETWORK_CAPTURE.md)** for detailed platform-specific setup instructions.
 
-### Installation
-
+### Linux
 ```bash
-# Ubuntu/Debian
-sudo apt-get install libpcap-dev
-
-# CentOS/RHEL
-sudo yum install libpcap-devel
-
-# Alpine (for Docker containers)
-apk add libpcap-dev
-```
-
-## Running with Privileges
-
-### Option 1: Run as Root (Development)
-```bash
+sudo apt-get install libpcap-dev  # Ubuntu/Debian
 sudo cargo run
 ```
 
-### Option 2: Use Capabilities (Production)
+### macOS
 ```bash
-# Grant CAP_NET_RAW capability
-sudo setcap cap_net_raw,cap_net_admin=eip target/debug/eyes-devine-server
-cargo run
+# libpcap is built-in, just need Xcode tools
+xcode-select --install
+sudo cargo run
 ```
 
-### Option 3: Docker Container with Privileges
-```yaml
-# docker-compose.yml
-services:
-  monitor:
-    image: eyes-devine-server
-    cap_add:
-      - NET_RAW
-      - NET_ADMIN
-    network_mode: host  # Required to access network interfaces
-    # OR use specific network
-    networks:
-      - monitoring
-```
+### Windows
+1. Install [Npcap](https://nmap.org/npcap/)
+2. Run PowerShell as Administrator
+3. `cargo run`
 
 ## How It Works
 
-1. **Interface Detection**: Automatically detects Docker network interfaces (`docker0`, `br-*`, etc.)
-2. **Packet Capture**: Uses `pcap` to capture TCP packets on port 80/8080/443
-3. **HTTP Parsing**: Reassembles TCP streams and parses HTTP protocol
+1. **Interface Detection**: Automatically detects Docker network interfaces (cross-platform)
+   - Linux: `docker0`, `br-*`, `veth*`
+   - macOS: `bridge0`, `en0`, `vmnet*`
+   - Windows: `vEthernet (WSL)`, `DockerNAT`, `Ethernet`
+2. **Packet Capture**: Uses `pcap` crate to capture TCP packets on ports 80/8080/8000/3000/5000
+3. **HTTP Parsing**: Parses HTTP protocol from packet payloads
 4. **Request Extraction**: Extracts:
    - HTTP Method (GET, POST, etc.)
    - Endpoint path
    - Status code
    - Response time
 5. **Container Mapping**: Maps IP addresses to containers using Docker API
+
+## Requirements
+
+- **Linux**: `libpcap-dev`, root or `CAP_NET_RAW`
+- **macOS**: Xcode Command Line Tools, root/admin
+- **Windows**: Npcap/WinPcap, Administrator privileges
+
+For detailed setup instructions, see [CROSS_PLATFORM_NETWORK_CAPTURE.md](./CROSS_PLATFORM_NETWORK_CAPTURE.md).
 6. **Storage**: Stores requests in memory (can be extended to database)
 
 ## Current Implementation Status

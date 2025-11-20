@@ -41,6 +41,27 @@ impl MigrationTrait for Migration {
         .await
         .ok();
 
+        // Add retention policy for http_requests (keep raw data for 7 days)
+        // Only if table exists (table is created in migration 000010)
+        conn.execute_unprepared(
+            r#"
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'http_requests'
+                ) THEN
+                    PERFORM add_retention_policy('http_requests', 
+                        INTERVAL '7 days',
+                        if_not_exists => TRUE);
+                END IF;
+            END $$;
+            "#,
+        )
+        .await
+        .ok();
+
         // Enable compression for container_stats (compress data older than 1 day)
         conn.execute_unprepared(
             r#"
@@ -66,6 +87,30 @@ impl MigrationTrait for Migration {
             SELECT add_compression_policy('container_logs', 
                 INTERVAL '1 day',
                 if_not_exists => TRUE);
+            "#,
+        )
+        .await
+        .ok();
+
+        // Enable compression for http_requests (only if table exists)
+        conn.execute_unprepared(
+            r#"
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_schema = 'public' 
+                    AND table_name = 'http_requests'
+                ) THEN
+                    ALTER TABLE http_requests SET (
+                        timescaledb.compress,
+                        timescaledb.compress_segmentby = 'container_id'
+                    );
+                    PERFORM add_compression_policy('http_requests', 
+                        INTERVAL '1 day',
+                        if_not_exists => TRUE);
+                END IF;
+            END $$;
             "#,
         )
         .await

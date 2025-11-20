@@ -1,5 +1,5 @@
 use eyes_devine_shared::{ContainerLog, LogFilter, HttpRequest};
-use eyes_devine_services::{CacheService, DockerService, CachedQueryService, ServiceMapService, NetworkMonitorService};
+use eyes_devine_services::{CacheService, DockerService, CachedQueryService, ServiceMapService};
 use actix_web::{web, HttpResponse, Responder, Error};
 use actix_web::web::Bytes;
 use chrono::{Utc, DateTime};
@@ -15,7 +15,6 @@ pub struct AppState {
     pub query_service: Option<Arc<CachedQueryService>>,
     pub cache_service: Arc<CacheService>,
     pub query_validator: HistoryQueryValidator,
-    pub network_monitor: Option<Arc<NetworkMonitorService>>,
 }
 
 /// Get total stats aggregated from all containers (from database)
@@ -415,235 +414,81 @@ pub async fn get_service_map(
 }
 
 /// Get HTTP requests for a specific container/service
-/// Uses network-level packet capture (if available) or falls back to log parsing
+/// Queries from database (collected by worker service)
+/// Supports both container ID and container name in the path
 pub async fn get_container_http_requests(
     state: web::Data<AppState>,
     path: web::Path<String>,
     query: web::Query<std::collections::HashMap<String, String>>,
 ) -> impl Responder {
-    let container_id = path.into_inner();
+    let container_identifier = path.into_inner();
     let limit = query
         .get("limit")
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(100);
 
-    // Get container name
-    let container_name = state
-        .docker_service
-        .list_containers()
-        .await
-        .ok()
-        .and_then(|containers| {
-            containers
-                .iter()
-                .find(|c| c.id == container_id)
-                .map(|c| c.name.clone())
-        })
-        .unwrap_or_else(|| container_id.clone());
-
-    let mut http_requests: Vec<HttpRequest> = Vec::new();
-
-    // Try network-level capture first (if available)
-    if let Some(network_monitor) = &state.network_monitor {
-        match network_monitor.get_container_requests(&container_id).await {
-            Ok(requests) => {
-                if !requests.is_empty() {
-                    log::debug!("Found {} requests from network monitoring", requests.len());
-                    http_requests = requests;
-                    // Limit results
-                    if http_requests.len() > limit as usize {
-                        http_requests.truncate(limit as usize);
-                    }
-                    return HttpResponse::Ok().json(http_requests);
-                }
-            }
-            Err(e) => {
-                log::debug!("Network monitoring not available: {}. Falling back to log parsing.", e);
-            }
-        }
-    }
-
-    // Fallback to log parsing
-    let logs = match state
-        .docker_service
-        .get_container_logs(&container_id, None, None, Some(limit))
-        .await
-    {
-        Ok(logs) => logs,
-        Err(e) => {
-            log::error!("Failed to get container logs: {}", e);
-            return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": format!("Failed to get container logs: {}", e)
+    let query_service = match &state.query_service {
+        Some(qs) => qs,
+        None => {
+            return HttpResponse::ServiceUnavailable().json(serde_json::json!({
+                "error": "Database not available"
             }));
         }
     };
 
-    // Parse logs for HTTP request patterns
-    // Common patterns:
-    // - "GET /api/users 200 45ms"
-    // - "POST /api/orders 201 123ms"
-    // - "127.0.0.1 - - [25/Dec/2024:10:00:00 +0000] \"GET /api/health HTTP/1.1\" 200 45"
-    // - "GET /endpoint HTTP/1.1" 200 0.045s
-    http_requests = logs
-        .iter()
-        .enumerate()
-        .filter_map(|(idx, log_line)| {
-            parse_http_request_from_log(log_line, &container_id, &container_name, idx)
-        })
-        .collect();
-
-    // If no requests found in logs, check network activity
-    if http_requests.is_empty() && !logs.is_empty() {
-        if let Ok(stats) = state.docker_service.get_container_stats(&container_id).await {
-            if stats.network_rx_bytes > 0 || stats.network_tx_bytes > 0 {
-                log::debug!(
-                    "No HTTP requests found in logs for container {}, but network activity detected. \
-                    Network-level packet capture is being set up to automatically capture requests.",
-                    container_id
-                );
+    // Find container by ID or name
+    let container_id = match state.docker_service.list_containers().await {
+        Ok(containers) => {
+            // Try to find by ID first
+            if let Some(container) = containers.iter().find(|c| c.id == container_identifier) {
+                container.id.clone()
+            } else if let Some(container) = containers.iter().find(|c| 
+                c.name == container_identifier || 
+                c.name.trim_start_matches('/') == container_identifier ||
+                c.name.ends_with(&container_identifier)
+            ) {
+                container.id.clone()
+            } else {
+                log::warn!("Container not found: {} (tried as ID and name)", container_identifier);
+                return HttpResponse::NotFound().json(serde_json::json!({
+                    "error": format!("Container not found: {}", container_identifier)
+                }));
             }
         }
-    }
+        Err(e) => {
+            log::error!("Failed to list containers: {}", e);
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to list containers: {}", e)
+            }));
+        }
+    };
 
-    HttpResponse::Ok().json(http_requests)
-}
+    log::debug!("Getting HTTP requests for container: {} from database", container_id);
 
-/// Parse HTTP request information from a log line
-/// Supports multiple common log formats
-fn parse_http_request_from_log(
-    log_line: &str,
-    container_id: &str,
-    container_name: &str,
-    idx: usize,
-) -> Option<HttpRequest> {
-    use regex::Regex;
-    use std::sync::OnceLock;
-
-    // Pattern 1: "GET /api/users 200 45ms" or "POST /api/orders 201 123.5ms"
-    static PATTERN1: OnceLock<Regex> = OnceLock::new();
-    let pattern1 = PATTERN1.get_or_init(|| {
-        Regex::new(r"(?i)(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^\s]+)\s+(\d{3})\s+([\d.]+)ms?").unwrap()
-    });
+    // Parse optional time range query parameters
+    let from = query
+        .get("from")
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
     
-    // Pattern 2: Apache/Nginx style: "127.0.0.1 - - [timestamp] \"GET /path HTTP/1.1\" 200 45"
-    static PATTERN2: OnceLock<Regex> = OnceLock::new();
-    let pattern2 = PATTERN2.get_or_init(|| {
-        Regex::new(r#""(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^\s"]+)\s+HTTP/[^"]*"\s+(\d{3})\s+([\d.]+)"#).unwrap()
-    });
-    
-    // Pattern 3: "GET /endpoint HTTP/1.1" 200 0.045s
-    static PATTERN3: OnceLock<Regex> = OnceLock::new();
-    let pattern3 = PATTERN3.get_or_init(|| {
-        Regex::new(r#"(?i)(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^\s]+)\s+HTTP/[^\s]+\s+(\d{3})\s+([\d.]+)s"#).unwrap()
-    });
-    
-    // Pattern 4: JSON log format: {"method":"GET","path":"/api/users","status":200,"duration":45.2}
-    static PATTERN4: OnceLock<Regex> = OnceLock::new();
-    let pattern4 = PATTERN4.get_or_init(|| {
-        Regex::new(r#""method"\s*:\s*"([^"]+)"[^}]*"path"\s*:\s*"([^"]+)"[^}]*"status"\s*:\s*(\d{3})[^}]*"duration"\s*:\s*([\d.]+)"#).unwrap()
-    });
+    let to = query
+        .get("to")
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
 
-    // Try Pattern 1
-    if let Some(caps) = pattern1.captures(log_line) {
-        if let (Some(method), Some(endpoint), Some(status), Some(time)) = (
-            caps.get(1),
-            caps.get(2),
-            caps.get(3),
-            caps.get(4),
-        ) {
-            if let (Ok(status_code), Ok(response_time)) = (
-                status.as_str().parse::<u16>(),
-                time.as_str().parse::<f64>(),
-            ) {
-                return Some(HttpRequest {
-                    container_id: container_id.to_string(),
-                    container_name: container_name.to_string(),
-                    endpoint: endpoint.as_str().to_string(),
-                    method: method.as_str().to_uppercase(),
-                    http_status: status_code,
-                    response_time_ms: response_time,
-                    timestamp: Utc::now() - chrono::Duration::seconds(idx as i64),
-                });
-            }
+    // Query database for HTTP requests
+    match query_service.get_container_http_requests(&container_id, from, to, Some(limit)).await {
+        Ok(requests) => {
+            log::info!("Retrieved {} HTTP requests from database for container {}", requests.len(), container_id);
+            HttpResponse::Ok().json(requests)
+        }
+        Err(e) => {
+            log::error!("Failed to get HTTP requests from database: {}", e);
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": format!("Failed to get HTTP requests: {}", e)
+            }))
         }
     }
-
-    // Try Pattern 2
-    if let Some(caps) = pattern2.captures(log_line) {
-        if let (Some(method), Some(endpoint), Some(status), Some(time)) = (
-            caps.get(1),
-            caps.get(2),
-            caps.get(3),
-            caps.get(4),
-        ) {
-            if let (Ok(status_code), Ok(response_time)) = (
-                status.as_str().parse::<u16>(),
-                time.as_str().parse::<f64>(),
-            ) {
-                return Some(HttpRequest {
-                    container_id: container_id.to_string(),
-                    container_name: container_name.to_string(),
-                    endpoint: endpoint.as_str().to_string(),
-                    method: method.as_str().to_uppercase(),
-                    http_status: status_code,
-                    response_time_ms: response_time,
-                    timestamp: Utc::now() - chrono::Duration::seconds(idx as i64),
-                });
-            }
-        }
-    }
-
-    // Try Pattern 3
-    if let Some(caps) = pattern3.captures(log_line) {
-        if let (Some(method), Some(endpoint), Some(status), Some(time)) = (
-            caps.get(1),
-            caps.get(2),
-            caps.get(3),
-            caps.get(4),
-        ) {
-            if let (Ok(status_code), Ok(response_time_sec)) = (
-                status.as_str().parse::<u16>(),
-                time.as_str().parse::<f64>(),
-            ) {
-                return Some(HttpRequest {
-                    container_id: container_id.to_string(),
-                    container_name: container_name.to_string(),
-                    endpoint: endpoint.as_str().to_string(),
-                    method: method.as_str().to_uppercase(),
-                    http_status: status_code,
-                    response_time_ms: response_time_sec * 1000.0, // Convert seconds to ms
-                    timestamp: Utc::now() - chrono::Duration::seconds(idx as i64),
-                });
-            }
-        }
-    }
-
-    // Try Pattern 4 (JSON)
-    if let Some(caps) = pattern4.captures(log_line) {
-        if let (Some(method), Some(endpoint), Some(status), Some(time)) = (
-            caps.get(1),
-            caps.get(2),
-            caps.get(3),
-            caps.get(4),
-        ) {
-            if let (Ok(status_code), Ok(response_time)) = (
-                status.as_str().parse::<u16>(),
-                time.as_str().parse::<f64>(),
-            ) {
-                return Some(HttpRequest {
-                    container_id: container_id.to_string(),
-                    container_name: container_name.to_string(),
-                    endpoint: endpoint.as_str().to_string(),
-                    method: method.as_str().to_uppercase(),
-                    http_status: status_code,
-                    response_time_ms: response_time,
-                    timestamp: Utc::now() - chrono::Duration::seconds(idx as i64),
-                });
-            }
-        }
-    }
-
-    None
 }
 
 /// Query parameters for history endpoints

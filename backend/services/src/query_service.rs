@@ -1,8 +1,8 @@
 use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter, ColumnTrait, QueryOrder, QuerySelect};
 use chrono::{DateTime, Utc, FixedOffset};
 use anyhow::Result;
-use eyes_devine_shared::{ContainerStats, ContainerInfo, ImageInfo};
-use crate::entity::{container_stats, container_info, docker_images, image_versions};
+use eyes_devine_shared::{ContainerStats, ContainerInfo, ImageInfo, HttpRequest};
+use crate::entity::{container_stats, container_info, docker_images, image_versions, http_requests};
 
 pub struct QueryService {
     db: DatabaseConnection,
@@ -266,6 +266,53 @@ impl QueryService {
             created: Some(entity.timestamp.with_timezone(&Utc)),
             architecture: None,
             os: None,
+        }
+    }
+
+    /// Get HTTP requests for a specific container
+    pub async fn get_container_http_requests(
+        &self,
+        container_id: &str,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        limit: Option<u64>,
+    ) -> Result<Vec<HttpRequest>> {
+        let fixed_offset = FixedOffset::east_opt(0).unwrap();
+        
+        let mut query = http_requests::Entity::find()
+            .filter(http_requests::Column::ContainerId.eq(container_id));
+
+        if let Some(from_dt) = from {
+            let from_tz = from_dt.with_timezone(&fixed_offset);
+            query = query.filter(http_requests::Column::Timestamp.gte(from_tz));
+        }
+
+        if let Some(to_dt) = to {
+            let to_tz = to_dt.with_timezone(&fixed_offset);
+            query = query.filter(http_requests::Column::Timestamp.lte(to_tz));
+        }
+
+        query = query.order_by_desc(http_requests::Column::Timestamp);
+
+        if let Some(limit_val) = limit {
+            query = query.limit(limit_val);
+        }
+
+        let requests = query.all(&self.db).await?;
+
+        Ok(requests.iter().map(|r| Self::entity_to_http_request(r)).collect())
+    }
+
+    // Helper: Convert entity to HttpRequest
+    fn entity_to_http_request(entity: &http_requests::Model) -> HttpRequest {
+        HttpRequest {
+            container_id: entity.container_id.clone(),
+            container_name: entity.container_name.clone(),
+            endpoint: entity.endpoint.clone(),
+            method: entity.method.clone(),
+            http_status: entity.http_status as u16,
+            response_time_ms: entity.response_time_ms,
+            timestamp: entity.timestamp.with_timezone(&Utc),
         }
     }
 }

@@ -9,6 +9,7 @@ pub mod m20241201_000006_create_docker_images;
 pub mod m20241201_000007_create_image_versions;
 pub mod m20241201_000008_create_indexes_and_aggregates;
 pub mod m20241201_000009_add_retention_policies;
+pub mod m20241201_000010_create_http_requests;
 
 pub struct Migrator;
 
@@ -25,6 +26,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20241201_000007_create_image_versions::Migration),
             Box::new(m20241201_000008_create_indexes_and_aggregates::Migration),
             Box::new(m20241201_000009_add_retention_policies::Migration),
+            Box::new(m20241201_000010_create_http_requests::Migration),
         ]
     }
 }

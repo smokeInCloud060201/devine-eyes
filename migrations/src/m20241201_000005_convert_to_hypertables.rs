@@ -79,6 +79,9 @@ impl MigrationTrait for Migration {
 
         log::info!("Converted container_logs to hypertable");
 
+        // Note: http_requests table conversion is handled in migration 000010
+        // after the table is created
+
         Ok(())
     }
 
@@ -117,6 +120,8 @@ impl MigrationTrait for Migration {
         )
         .await
         .ok();
+
+        // Note: http_requests hypertable cleanup is handled in migration 000010 down method
 
         Ok(())
     }

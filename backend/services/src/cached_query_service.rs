@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use eyes_devine_shared::{ContainerStats, ContainerInfo, ImageInfo};
+use eyes_devine_shared::{ContainerStats, ContainerInfo, ImageInfo, HttpRequest};
 
 /// Wrapper around QueryService that adds Redis caching
 pub struct CachedQueryService {
@@ -240,6 +240,37 @@ impl CachedQueryService {
         }
 
         Ok(())
+    }
+
+    /// Get HTTP requests for a container (cached)
+    pub async fn get_container_http_requests(
+        &self,
+        container_id: &str,
+        from: Option<DateTime<Utc>>,
+        to: Option<DateTime<Utc>>,
+        limit: Option<u64>,
+    ) -> Result<Vec<HttpRequest>> {
+        // Create cache key from query parameters
+        let cache_key = format!(
+            "http_requests:{}:{}:{}:{}",
+            container_id,
+            from.map(|d| d.timestamp().to_string()).unwrap_or_else(|| "none".to_string()),
+            to.map(|d| d.timestamp().to_string()).unwrap_or_else(|| "none".to_string()),
+            limit.unwrap_or(0)
+        );
+
+        // Try cache first
+        if let Some(cached) = self.cache_service.get::<Vec<HttpRequest>>(&cache_key).await? {
+            return Ok(cached);
+        }
+
+        // Cache miss - query database
+        let result = self.query_service.get_container_http_requests(container_id, from, to, limit).await?;
+
+        // Store in cache (shorter TTL for request queries)
+        let _ = self.cache_service.set(&cache_key, &result, Some(self.cache_ttl_history)).await;
+
+        Ok(result)
     }
 }
 

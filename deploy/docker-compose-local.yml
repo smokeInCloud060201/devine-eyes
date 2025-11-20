@@ -1,0 +1,108 @@
+version: '3.8'
+
+services:
+
+  eyes-devine-worker:
+    image: eye-devine-worker:latest
+    container_name: eyes-devine-worker
+    user: root
+    # Note: Using host network mode to capture ALL network traffic (host->containers, container->container)
+    # Port mapping is not needed in host mode - service is directly on host:8081
+    environment:
+      - WORKER_HOST=0.0.0.0
+      - WORKER_PORT=8081
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      # In host network mode, use localhost to connect to postgres/redis
+      # They're exposed on host ports 5432 and 6379
+      - DATABASE_URL=postgresql://postgres:postgres@localhost:5432/docker_monitor
+      - REDIS_URL=redis://localhost:6379
+      - RUST_LOG=debug
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # Use host network mode to see ALL network traffic on the host
+    # This allows capturing traffic from host->containers and container->container
+    network_mode: host
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+    # Note: depends_on doesn't work with host network mode
+    # Services will be available via localhost:port
+
+  eyes-devine-server:
+    image: eye-devine-api:latest
+    container_name: eyes-devine-server
+    user: root
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/docker_monitor
+      - REDIS_URL=redis://redis:6379
+      - CACHE_TTL_CONTAINERS=60
+      - CACHE_TTL_STATS=30
+      - CACHE_TTL_IMAGES=300
+      - CACHE_TTL_HISTORY=60
+      - MAX_QUERY_RANGE_DAYS=30
+      - MAX_RESULTS_PER_QUERY=10000
+      - RUST_LOG=info
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - eye-devine-network
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: timescale/timescaledb:latest-pg18
+    container_name: docker-monitor-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: docker_monitor
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eye-devine-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: docker-monitor-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - eye-devine-network
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  eye-devine-network:
+    external: true

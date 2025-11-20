@@ -11,6 +11,7 @@ pub struct Config {
     pub stats_collection_interval: Duration,
     pub status_collection_interval: Duration,
     pub image_collection_interval: Duration,
+    pub http_requests_collection_interval: Duration,
     
     // Batch settings
     pub batch_size: usize,
@@ -46,6 +47,11 @@ impl Config {
             .and_then(|s| s.parse().ok())
             .unwrap_or(60);
         
+        let http_requests_interval_secs = env::var("HTTP_REQUESTS_COLLECTION_INTERVAL")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(30);
+        
         // Batch settings
         let batch_size = env::var("BATCH_SIZE")
             .ok()
@@ -64,6 +70,7 @@ impl Config {
             stats_collection_interval: Duration::from_secs(stats_interval_secs),
             status_collection_interval: Duration::from_secs(status_interval_secs),
             image_collection_interval: Duration::from_secs(image_interval_secs),
+            http_requests_collection_interval: Duration::from_secs(http_requests_interval_secs),
             batch_size,
             batch_timeout: Duration::from_secs(batch_timeout_secs),
         }

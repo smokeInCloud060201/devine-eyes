@@ -21,4 +21,5 @@ pub use entity::container_logs;
 pub use entity::container_info;
 pub use entity::docker_images;
 pub use entity::image_versions;
+pub use entity::http_requests;
 

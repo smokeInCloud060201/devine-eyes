@@ -1,4 +1,4 @@
-ARG RUST_VERSION=1.88.0
+ARG RUST_VERSION=1.90.0
 ARG APP_NAME=eyes-devine-server
 
 FROM rust:${RUST_VERSION}-slim AS build
